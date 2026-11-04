@@ -10,9 +10,11 @@ export default function StudyGroups({ classId }) {
   const [text,setText]=useState(''),[file,setFile]=useState(null),[error,setError]=useState(''),[sending,setSending]=useState(false),[reading,setReading]=useState(false),[downloadId,setDownloadId]=useState(''),[older,setOlder]=useState(null),[paging,setPaging]=useState(false),[outbox,setOutbox]=useState(null),[showMembers,setShowMembers]=useState(false),[newCount,setNewCount]=useState(0),[syncError,setSyncError]=useState('');
   const pending=useRef(null),viewport=useRef(null),input=useRef(null),generation=useRef(0),polling=useRef(false),nearBottom=useRef(true),tracking=useRef(false),readIds=useRef(new Set()),acknowledged=useRef(new Set()),ackBusy=useRef(false),refreshChat=useRef(null);
   const knownIds=useRef(new Set());
+  const [signup,setSignup]=useState(null);
   const fileReader=useRef(null);
   const loadPlan=useCallback(async()=>{
-    const epoch=++generation.current;fileReader.current?.abort();fileReader.current=null;setReading(false);setFile(null);setText('');if(input.current)input.current.value='';setLoadingPlan(true);setError('');setMessages([]);setPlan(null);setGroupId('');setOutbox(null);tracking.current=false;
+    const epoch=++generation.current;fileReader.current?.abort();fileReader.current=null;setReading(false);setFile(null);setText('');if(input.current)input.current.value='';setLoadingPlan(true);setError('');setMessages([]);setPlan(null);setGroupId('');setOutbox(null);setSignup(null);tracking.current=false;
+    portalCall('getGroupSignupSheet',{classId}).then(r=>{if(epoch===generation.current)setSignup(r);}).catch(()=>{});
     try { const p=await portalCall('getGroupPlan',{classId});if(epoch!==generation.current)return;setPlan(p);setGroupId(p.groups[0]?.id||''); }
     catch(e){if(epoch===generation.current)setError(e.message);}finally{if(epoch===generation.current)setLoadingPlan(false);}
   },[classId]);
@@ -83,12 +85,14 @@ export default function StudyGroups({ classId }) {
     catch(e){if(epoch===generation.current)setError(e.message);}finally{if(epoch===generation.current)setPaging(false);}
   }
   const group=plan?.groups.find(g=>g.id===groupId),members=plan?.students||[],display=[...messages,...(outbox?[outbox]:[])];
+  const signupUrl=signup?.state==='OPEN'&&/^https:\/\/docs\.google\.com\/spreadsheets\/d\/[A-Za-z0-9_-]+\/edit#gid=\d+$/.test(signup.url)?signup.url:null;
   return <section className="card group-workspace chat-workspace" aria-label="Nhóm học tập">
     <header className="chat-heading"><div className="chat-group-avatar"><Icon name="school" size={27}/></div><div className="chat-heading-text"><span className="eyebrow">NHÓM HỌC TẬP</span><h2>{group?.name||'Nhóm học tập của tôi'}</h2><button className="members-toggle" onClick={()=>setShowMembers(s=>!s)} disabled={!group} aria-expanded={showMembers}>{members.length} thành viên <Icon name="chevron" size={14}/></button></div><button className="icon-button" aria-label="Tải lại nhóm" title="Tải lại nhóm" disabled={sending||!!pending.current} onClick={()=>{if((text||file||reading)&&!window.confirm('Bỏ tin nhắn và tệp chưa gửi để tải lại nhóm?'))return;loadPlan();}}><Icon name="refresh"/></button></header>
     {showMembers&&group&&<div className="chat-members">{members.map(s=><div key={s.studentId}><span className="avatar">{initials(s.fullName)}</span><span><strong>{s.fullName}</strong><small>{s.studentCode}</small></span></div>)}</div>}
     {error&&<div className="chat-notice"><Notice>{error}</Notice></div>}
+    {signupUrl&&<div className="group-signup-banner" role="status"><div><strong>Đang mở đăng ký nhóm</strong><p>Chọn nhóm ở dòng MSSV của bạn trên Google Sheets. Chờ cột Đồng bộ xác nhận rồi bấm Tải lại nhóm.</p></div><a href={signupUrl} target="_blank" rel="noreferrer">Chọn nhóm trên Google Sheets <Icon name="arrow" size={16}/></a></div>}
     {pending.current&&!sending&&<button className="pending-discard" type="button" onClick={()=>{if(!window.confirm('Tin nhắn có thể đã được máy chủ nhận. Bỏ bản chờ và kiểm tra lịch sử trước khi gửi mới?'))return;pending.current=null;setOutbox(null);setText('');setFile(null);loadPlan();}}>Bỏ bản gửi đang chờ và kiểm tra lại</button>}
-    {loadingPlan?<Skeleton kind="chat" label="Đang tải nhóm…"/>:!group?<EmptyState icon="school" title={error?'Chưa tải được nhóm':'Bạn chưa được xếp nhóm'}>{error?'Bấm tải lại để kiểm tra nhóm của bạn.':'Giảng viên chưa xếp bạn vào nhóm. Hãy tải lại sau khi giảng viên chia nhóm.'}</EmptyState>:<>
+    {loadingPlan?<Skeleton kind="chat" label="Đang tải nhóm…"/>:!group?<EmptyState icon="school" title={error?'Chưa tải được nhóm':signupUrl?'Chọn nhóm để bắt đầu':'Bạn chưa được xếp nhóm'}>{error?'Bấm tải lại để kiểm tra nhóm của bạn.':signupUrl?'Mở Sheet đăng ký phía trên, chọn nhóm và đợi xác nhận đồng bộ.':'Giảng viên chưa xếp bạn vào nhóm. Hãy tải lại sau khi giảng viên chia nhóm.'}</EmptyState>:<>
       <div className="chat-toolbar"><span><Icon name="shield" size={14}/> Chỉ thành viên nhóm và giảng viên có quyền truy cập</span><span className={syncError?'chat-connection error':'chat-connection'}><i/>{syncError?'Chưa đồng bộ':'Cập nhật mỗi 10 giây'}</span></div>
       {syncError&&<div className="chat-sync-error" role="alert">{syncError}<button onClick={()=>refreshChat.current?.()}>Thử lại</button></div>}
       <div className="conversation" ref={viewport} aria-label="Tin nhắn nhóm" aria-busy={loadingChat} onScroll={()=>{const p=viewport.current;nearBottom.current=p.scrollHeight-p.scrollTop-p.clientHeight<80;if(nearBottom.current)setNewCount(0);}}>

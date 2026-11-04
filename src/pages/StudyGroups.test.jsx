@@ -75,3 +75,15 @@ it('rejects empty, oversized, unsupported and invalid-name files before calling 
  }
  expect(mocks.call.mock.calls.some(c=>c[0]==='sendGroupMessage')).toBe(false);
 });
+it('unassigned students can open the actual restricted Google Sheet registration link',async()=>{
+ mocks.call.mockImplementation(async method=>method==='getGroupSignupSheet'?{state:'OPEN',url:'https://docs.google.com/spreadsheets/d/doc-1/edit#gid=100'}:{groups:[],students:[]});
+ render(<StudyGroups classId="c1"/>);
+ const link=await screen.findByRole('link',{name:/Chọn nhóm trên Google Sheets/});
+ expect(link.getAttribute('href')).toBe('https://docs.google.com/spreadsheets/d/doc-1/edit#gid=100');
+ expect(link.getAttribute('rel')).toBe('noreferrer');expect(await screen.findByText('Chọn nhóm để bắt đầu')).toBeTruthy();
+});
+it('never presents a signup link pointing outside Google Sheets',async()=>{
+ mocks.call.mockImplementation(async method=>method==='getGroupSignupSheet'?{state:'OPEN',url:'https://evil.test/'}:{groups:[],students:[]});
+ render(<StudyGroups classId="c1"/>);await screen.findByText('Bạn chưa được xếp nhóm');
+ expect(screen.queryByRole('link',{name:/Chọn nhóm trên Google Sheets/})).toBeNull();
+});
