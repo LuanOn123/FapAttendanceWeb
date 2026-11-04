@@ -22,3 +22,9 @@ npm run dev -- --host 127.0.0.1
 Deploy đã cấu hình bằng `npm run deploy` (Firebase project `fap-attendance-88920`, target `hosting:student`). Chỉ deploy sau khi backend đã có API mới; bản local này chưa được triển khai. Không thay Firestore rules hay site QR để bật thông báo.
 
 Hướng dẫn owner/queue/quota nằm ở `docs/GROUP_TASK_NOTIFICATIONS.md` của repo mobile. Email bị lỗi không rõ kết quả cần owner kiểm tra; không suy ra email đã đọc từ trạng thái gửi.
+
+## File trong chat
+
+Nhóm học tập → **Gửi file** → chọn tệp → **Gửi kèm file**. Có thể gửi không kèm chữ, bỏ/đổi tệp trước khi gửi. Hỗ trợ PDF, PNG/JPG/JPEG, DOCX, XLSX, TXT, CSV; một tệp/tin, tối đa 500 KB, tên tối đa 120 ký tự, không nhận tệp rỗng. Người nhận bấm thẻ file để tải xuống sau khi backend kiểm quyền nhóm. Thử lại sau lỗi mạng dùng cùng mã gửi và file đã chọn.
+
+Backend cần cấu hình Drive riêng tư bằng `setupStudyGroups()`/`GROUP_FILES_FOLDER_ID`. Không đưa service account hoặc link chia sẻ công khai vào client. Đổi lớp/unmount sẽ hủy lần đọc file đang chờ; tải lại nhóm khi còn nháp sẽ hỏi trước khi bỏ nháp. Phần này đang ở local, chưa deploy.

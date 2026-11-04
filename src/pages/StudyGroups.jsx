@@ -10,12 +10,13 @@ export default function StudyGroups({ classId }) {
   const [text,setText]=useState(''),[file,setFile]=useState(null),[error,setError]=useState(''),[sending,setSending]=useState(false),[reading,setReading]=useState(false),[downloadId,setDownloadId]=useState(''),[older,setOlder]=useState(null),[paging,setPaging]=useState(false),[outbox,setOutbox]=useState(null),[showMembers,setShowMembers]=useState(false),[newCount,setNewCount]=useState(0),[syncError,setSyncError]=useState('');
   const pending=useRef(null),viewport=useRef(null),input=useRef(null),generation=useRef(0),polling=useRef(false),nearBottom=useRef(true),tracking=useRef(false),readIds=useRef(new Set()),acknowledged=useRef(new Set()),ackBusy=useRef(false),refreshChat=useRef(null);
   const knownIds=useRef(new Set());
+  const fileReader=useRef(null);
   const loadPlan=useCallback(async()=>{
-    const epoch=++generation.current;setLoadingPlan(true);setError('');setMessages([]);setPlan(null);setGroupId('');setOutbox(null);tracking.current=false;
+    const epoch=++generation.current;fileReader.current?.abort();fileReader.current=null;setReading(false);setFile(null);setText('');if(input.current)input.current.value='';setLoadingPlan(true);setError('');setMessages([]);setPlan(null);setGroupId('');setOutbox(null);tracking.current=false;
     try { const p=await portalCall('getGroupPlan',{classId});if(epoch!==generation.current)return;setPlan(p);setGroupId(p.groups[0]?.id||''); }
     catch(e){if(epoch===generation.current)setError(e.message);}finally{if(epoch===generation.current)setLoadingPlan(false);}
   },[classId]);
-  useEffect(()=>{loadPlan();return()=>{generation.current++;};},[loadPlan]);
+  useEffect(()=>{loadPlan();return()=>{generation.current++;fileReader.current?.abort();fileReader.current=null;};},[loadPlan]);
   const scrollEnd=useCallback(()=>{if(viewport.current)viewport.current.scrollTop=viewport.current.scrollHeight;nearBottom.current=true;setNewCount(0);},[]);
   const acknowledge=useCallback(async(ids,seen=false)=>{
     if(!tracking.current||!groupId||!ids.length)return;
@@ -51,9 +52,13 @@ export default function StudyGroups({ classId }) {
     return()=>{observer.disconnect();clearInterval(flush);readIds.current.clear();};
   },[messages,acknowledge]);
   async function chooseFile(e){
+    if(sending||reading||pending.current)return;
     const chosen=e.target.files[0];setError('');if(!chosen)return;
-    if(chosen.size>512000||chosen.size===0||!/\.(pdf|txt|png|jpe?g|xlsx|docx|csv)$/i.test(chosen.name)){setError('Chọn PDF, ảnh, Word, Excel, TXT hoặc CSV tối đa 500 KB.');e.target.value='';return;}
-    setReading(true);const epoch=generation.current,reader=new FileReader();reader.onload=()=>{if(epoch===generation.current){setFile({name:chosen.name,base64:String(reader.result).split(',')[1],size:chosen.size});setReading(false);}};reader.onerror=()=>{if(epoch===generation.current){setError('Không đọc được tệp.');setReading(false);}};reader.readAsDataURL(chosen);
+    if(chosen.size>512000||chosen.size===0||chosen.name.length>120||/[\x00-\x1f\\/]/.test(chosen.name)||!/\.(pdf|txt|png|jpe?g|xlsx|docx|csv)$/i.test(chosen.name)){setError('Chọn PDF, ảnh, Word, Excel, TXT hoặc CSV có nội dung, tối đa 500 KB; tên tối đa 120 ký tự.');e.target.value='';return;}
+    setReading(true);const epoch=generation.current,reader=new FileReader();fileReader.current=reader;
+    reader.onload=()=>{if(epoch===generation.current&&fileReader.current===reader){setFile({name:chosen.name,base64:String(reader.result).split(',')[1],size:chosen.size});setReading(false);fileReader.current=null;}};
+    reader.onerror=()=>{if(epoch===generation.current&&fileReader.current===reader){setError('Không đọc được tệp. Chọn lại tệp đã tải về máy.');setReading(false);fileReader.current=null;if(input.current)input.current.value='';}};
+    reader.readAsDataURL(chosen);
   }
   async function send(e){
     e?.preventDefault();if(sending||reading||(!pending.current&&!text.trim()&&!file))return;
@@ -79,7 +84,7 @@ export default function StudyGroups({ classId }) {
   }
   const group=plan?.groups.find(g=>g.id===groupId),members=plan?.students||[],display=[...messages,...(outbox?[outbox]:[])];
   return <section className="card group-workspace chat-workspace" aria-label="Nhóm học tập">
-    <header className="chat-heading"><div className="chat-group-avatar"><Icon name="school" size={27}/></div><div className="chat-heading-text"><span className="eyebrow">NHÓM HỌC TẬP</span><h2>{group?.name||'Nhóm học tập của tôi'}</h2><button className="members-toggle" onClick={()=>setShowMembers(s=>!s)} disabled={!group} aria-expanded={showMembers}>{members.length} thành viên <Icon name="chevron" size={14}/></button></div><button className="icon-button" aria-label="Tải lại nhóm" title="Tải lại nhóm" disabled={sending||!!pending.current} onClick={loadPlan}><Icon name="refresh"/></button></header>
+    <header className="chat-heading"><div className="chat-group-avatar"><Icon name="school" size={27}/></div><div className="chat-heading-text"><span className="eyebrow">NHÓM HỌC TẬP</span><h2>{group?.name||'Nhóm học tập của tôi'}</h2><button className="members-toggle" onClick={()=>setShowMembers(s=>!s)} disabled={!group} aria-expanded={showMembers}>{members.length} thành viên <Icon name="chevron" size={14}/></button></div><button className="icon-button" aria-label="Tải lại nhóm" title="Tải lại nhóm" disabled={sending||!!pending.current} onClick={()=>{if((text||file||reading)&&!window.confirm('Bỏ tin nhắn và tệp chưa gửi để tải lại nhóm?'))return;loadPlan();}}><Icon name="refresh"/></button></header>
     {showMembers&&group&&<div className="chat-members">{members.map(s=><div key={s.studentId}><span className="avatar">{initials(s.fullName)}</span><span><strong>{s.fullName}</strong><small>{s.studentCode}</small></span></div>)}</div>}
     {error&&<div className="chat-notice"><Notice>{error}</Notice></div>}
     {pending.current&&!sending&&<button className="pending-discard" type="button" onClick={()=>{if(!window.confirm('Tin nhắn có thể đã được máy chủ nhận. Bỏ bản chờ và kiểm tra lịch sử trước khi gửi mới?'))return;pending.current=null;setOutbox(null);setText('');setFile(null);loadPlan();}}>Bỏ bản gửi đang chờ và kiểm tra lại</button>}
@@ -94,7 +99,7 @@ export default function StudyGroups({ classId }) {
       {newCount>0&&<button className="new-messages" onClick={scrollEnd}>Có tin nhắn mới <Icon name="download" size={14}/></button>}
       <form className="chat-composer" onSubmit={send}><label className="sr-only" htmlFor="group-message">Tin nhắn cho nhóm</label>{file&&<div className="attachment-preview"><Icon name="document"/><span><strong>{file.name}</strong><small>{Math.ceil(file.size/1024)} KB · Sẵn sàng gửi</small></span><button type="button" className="icon-button" aria-label="Bỏ tệp đính kèm" disabled={sending||!!pending.current} onClick={()=>{setFile(null);if(input.current)input.current.value='';}}><Icon name="close" size={16}/></button></div>}
         <textarea id="group-message" value={text} maxLength={2000} rows={2} disabled={sending||!!pending.current} placeholder="Nhắn tin cho nhóm của bạn…" onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();send();}}}/>
-        <div className="composer-actions"><input ref={input} className="sr-only" aria-label="Tệp đính kèm nhóm" type="file" accept=".pdf,.txt,.png,.jpg,.jpeg,.xlsx,.docx,.csv" disabled={sending||reading||!!pending.current} onChange={chooseFile}/><button type="button" className="icon-button attach-button" title="Đính kèm tệp" aria-label="Đính kèm tệp" disabled={sending||reading||!!pending.current} onClick={()=>input.current?.click()}><Icon name="attach"/></button><span className="composer-hint">{reading?'Đang đọc tệp…':`${text.length}/2000 · Enter để gửi, Shift + Enter xuống dòng`}</span><button className="primary send-message" disabled={sending||reading||(!text.trim()&&!file)}><Icon name="send" size={17}/>{sending?'Đang gửi…':pending.current?'Thử gửi lại':'Gửi tin nhắn'}</button></div><p className="attachment-hint">PDF, ảnh, Word, Excel, TXT, CSV · Tối đa 500 KB/tệp</p>
+        <div className="composer-actions"><input ref={input} className="sr-only" aria-label="Tệp đính kèm nhóm" type="file" accept=".pdf,.txt,.png,.jpg,.jpeg,.xlsx,.docx,.csv" disabled={sending||reading||!!pending.current} onChange={chooseFile}/><button type="button" className="refresh-button attach-button" title="Đính kèm tệp" aria-label="Đính kèm tệp" disabled={sending||reading||!!pending.current} onClick={()=>input.current?.click()}><Icon name="attach"/><span>{file?'Đổi file':'Gửi file'}</span></button><span className="composer-hint">{reading?'Đang đọc tệp…':`${text.length}/2000 · Enter để gửi, Shift + Enter xuống dòng`}</span><button className="primary send-message" disabled={sending||reading||(!text.trim()&&!file)}><Icon name="send" size={17}/>{sending?'Đang gửi…':pending.current?'Thử gửi lại':file?'Gửi kèm file':'Gửi tin nhắn'}</button></div><p className="attachment-hint">PDF, ảnh, Word, Excel, TXT, CSV · 1 tệp/tin · Tối đa 500 KB/tệp</p>
       </form>
     </>}
   </section>;

@@ -38,3 +38,40 @@ it('does not claim delivery or read without confirmation and actual screen visib
 it('acknowledges delivery only after messages arrive; does not infer read without visibility',async()=>{
  mocks.call.mockImplementation(async method=>{if(method==='getGroupPlan')return plan;if(method==='getGroupMessages')return{receiptTracking:true,messages:[{id:'msg1',mine:false,text:'Incoming',createdAt:'2026-11-02T15:00:00Z'}],older:null};return{saved:true};});render(<StudyGroups classId="c1"/>);await screen.findByText('Incoming');await waitFor(()=>expect(mocks.call).toHaveBeenCalledWith('ackGroupMessages',{classId:'c1',groupId:'g1',deliveredIds:['msg1'],readIds:[]}));expect(mocks.call.mock.calls.filter(c=>c[0]==='ackGroupMessages').every(c=>!c[1].readIds.length)).toBe(true);
 });
+it('sends a file without text and retries the identical attachment after uncertainty',async()=>{
+ let attempts=0;
+ mocks.call.mockImplementation(async method=>{
+  if(method==='getGroupPlan')return {...plan,viewerId:'student-s1'};
+  if(method==='getGroupMessages')return {messages:[],older:null};
+  if(method==='sendGroupMessage'){attempts++;if(attempts===1)throw Error('timeout');return{saved:true,id:'file-message',createdAt:'2026-11-04T03:00:00Z'};}
+ });
+ const events=userEvent.setup();render(<StudyGroups classId="c1"/>);await screen.findByText('Nhóm 1');
+ await events.upload(screen.getByLabelText('Tệp đính kèm nhóm'),new File(['abc'],'Bai-tap.pdf',{type:'application/pdf'}));
+ await screen.findByRole('button',{name:'Gửi kèm file'});expect(attempts).toBe(0);
+ await events.click(screen.getByRole('button',{name:'Gửi kèm file'}));await screen.findByText(/Tin nhắn được giữ/);
+ expect(screen.getByRole('button',{name:'Bỏ tệp đính kèm'}).disabled).toBe(true);
+ await events.click(screen.getByRole('button',{name:'Thử gửi lại'}));
+ await waitFor(()=>expect(attempts).toBe(2));
+ const writes=mocks.call.mock.calls.filter(c=>c[0]==='sendGroupMessage');
+ expect(writes[0][1]).toEqual(writes[1][1]);expect(writes[0][1].file).toEqual({name:'Bai-tap.pdf',base64:'YWJj'});expect(writes[0][1].text).toBe('');
+ await waitFor(()=>expect(screen.queryByRole('button',{name:'Bỏ tệp đính kèm'})).toBeNull());
+});
+it('removes a selected file while retaining the message, and permits picking it again',async()=>{
+ mocks.call.mockImplementation(async method=>method==='getGroupPlan'?plan:{messages:[],older:null});
+ const events=userEvent.setup();render(<StudyGroups classId="c1"/>);await screen.findByText('Nhóm 1');
+ await events.type(screen.getByRole('textbox',{name:'Tin nhắn cho nhóm'}),'Đọc tài liệu');
+ const input=screen.getByLabelText('Tệp đính kèm nhóm'),file=new File(['abc'],'note.txt',{type:'text/plain'});
+ await events.upload(input,file);await screen.findByText('note.txt');
+ await events.click(screen.getByRole('button',{name:'Bỏ tệp đính kèm'}));
+ expect(screen.queryByText('note.txt')).toBeNull();expect(screen.getByRole('textbox',{name:'Tin nhắn cho nhóm'}).value).toBe('Đọc tài liệu');
+ await events.upload(input,file);expect(await screen.findByText('note.txt')).toBeTruthy();
+});
+it('rejects empty, oversized, unsupported and invalid-name files before calling the backend',async()=>{
+ mocks.call.mockImplementation(async method=>method==='getGroupPlan'?plan:{messages:[],older:null});
+ const events=userEvent.setup({applyAccept:false});render(<StudyGroups classId="c1"/>);await screen.findByText('Nhóm 1');
+ for(const file of [new File([],'empty.txt'),new File([new Uint8Array(512001)],'big.pdf'),new File(['a'],'bad.exe'),new File(['a'],'a'.repeat(121)+'.pdf')]){
+  await events.upload(screen.getByLabelText('Tệp đính kèm nhóm'),file);await screen.findByRole('alert');
+  expect(screen.queryByRole('button',{name:'Gửi kèm file'})).toBeNull();
+ }
+ expect(mocks.call.mock.calls.some(c=>c[0]==='sendGroupMessage')).toBe(false);
+});
