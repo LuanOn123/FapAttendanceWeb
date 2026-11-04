@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "fap-attendance-88920"
+  },
+  "targets": {
+    "fap-attendance-88920": {
+      "hosting": {
+        "student": [
+          "fap-sinhvien"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== Helpers =====
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+    // Super admin is hard-coded so the first import can bootstrap the config doc.
+    function isSuperAdmin() {
+      return signedIn() && myEmail() == 'phuonglhk@fpt.edu.vn';
+    }
+    function teacherList() {
+      return exists(/databases/$(database)/documents/config/app)
+        ? get(/databases/$(database)/documents/config/app).data.teachers
+        : [];
+    }
+    function isTeacher() {
+      return isSuperAdmin() || (signedIn() && myEmail() in teacherList());
+    }
+
+    // ===== Config (teacher allowlist) =====
+    match /config/{doc} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+    }
+
+    // ===== Semesters =====
+    match /semesters/{sem} {
+      allow read: if signedIn();
+      allow write: if isTeacher();
+
+      match /classes/{cls} {
+        allow read: if signedIn();
+        allow write: if isTeacher();
+
+        match /students/{roll} {
+          // Legacy grades become drafts; students read published API snapshots.
+          allow read: if isTeacher();
+
+          allow create, delete: if isTeacher();
+
+          // Legacy storage is restricted to teachers during migration.
+          allow update: if isTeacher();
+        }
+      }
+    }
+  }
+}

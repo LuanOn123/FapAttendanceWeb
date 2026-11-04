@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.local
+dist/
+.visual-qa/
+.firebase/
+*.log
+.DS_Store
+# Không commit dữ liệu điểm thật / file giải mã
+*.fg
+*.decoded.json
+*.portal.json
+tools/*.bin

@@ -1,0 +1,6 @@
+export default function Skeleton({ kind = 'list', label = 'Đang tải dữ liệu…' }) {
+  return <div className={`skeleton-block skeleton-${kind}`} role="status" aria-label={label} aria-busy="true"><span className="sr-only">{label}</span><div aria-hidden="true">
+    {kind === 'chat' ? [0,1,2,3].map(i => <div className={`sk-chat-row ${i % 2 ? 'own' : ''}`} key={i}><i className="sk sk-avatar"/><div><i className="sk sk-line sk-short"/><i className="sk sk-bubble"/><i className="sk sk-line sk-tiny"/></div></div>) : <><div className="sk-heading"><i className="sk sk-avatar"/><div><i className="sk sk-line sk-medium"/><i className="sk sk-line sk-short"/></div></div>{[0,1,2,3].map(i => <div className="sk-data-row" key={i}><i className="sk sk-line"/><i className="sk sk-line sk-short"/><i className="sk sk-line sk-tiny"/></div>)}</>}
+  </div></div>;
+}
+export function PortalSkeleton() { return <div className="portal-skeleton"><div className="sk-header"><i className="sk sk-avatar"/><i className="sk sk-line sk-medium"/></div><main className="wrap"><div className="sk-intro"><i className="sk sk-line"/><i className="sk sk-line sk-medium"/></div><section className="card"><Skeleton label="Đang mở không gian học tập…"/></section></main></div>; }
