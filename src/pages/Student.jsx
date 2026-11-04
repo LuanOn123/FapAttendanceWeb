@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { leaveStatuses, portalCall, portalEndpoint, vietnamDate } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
 import StudyGroups from './StudyGroups.jsx';
+import TaskNotifications, { useTaskNotifications } from './TaskNotifications.jsx';
 import Skeleton from '../components/Skeleton.jsx';
 import { EmptyState, Notice } from '../components/PortalShell.jsx';
 
@@ -10,7 +11,17 @@ const localTime = value => new Date(value).toLocaleString('vi-VN', { timeZone: '
 export default function Student({ user }) {
   const [classes, setClasses] = useState([]), [selected, setSelected] = useState('');
   const [loading, setLoading] = useState(true), [error, setError] = useState('');
-  const [tab, setTab] = useState('grades'), [revision, setRevision] = useState(0);
+  const [tab, setTab] = useState(() => window.location.hash === '#tasks' ? 'tasks' : 'grades'), [revision, setRevision] = useState(0);
+  const inbox = useTaskNotifications(user.uid);
+  const selectTab = value => {
+    setTab(value);
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${value === 'tasks' ? '#tasks' : ''}`);
+  };
+  useEffect(() => {
+    const openTasks = () => { if (window.location.hash === '#tasks') setTab('tasks'); };
+    window.addEventListener('hashchange', openTasks);
+    return () => window.removeEventListener('hashchange', openTasks);
+  }, []);
   useEffect(() => {
     let live = true; setLoading(true); setError('');
     portalCall('listClasses').then(rows => {
@@ -24,6 +35,11 @@ export default function Student({ user }) {
       <div className="class-stat"><span className="stat-icon"><Icon name="layers" size={25} /></span><div><strong>{loading ? '—' : error && !classes.length ? '—' : String(classes.length).padStart(2, '0')}</strong><span>Lớp học của bạn</span></div></div>
     </section>
     {!portalEndpoint && <Notice>Quản trị viên cần kết nối cổng sinh viên với backend chung trước khi sử dụng.</Notice>}
+    <nav className="task-shortcut" aria-label="Công việc nhóm">
+      <button className={tab === 'tasks' ? 'primary' : 'refresh-button'} aria-pressed={tab === 'tasks'} onClick={() => selectTab('tasks')}><Icon name="bell" /><span>Thông báo giao việc</span><span className="count-badge">{inbox.unread == null ? '—' : inbox.unread}</span></button>
+      {tab === 'tasks' && <button className="refresh-button" onClick={() => selectTab('grades')}><Icon name="book" />Về lớp học</button>}
+    </nav>
+    {tab === 'tasks' ? <TaskNotifications inbox={inbox} /> : <>
     {error && <Notice><strong>Chưa tải được lớp học</strong><p>{error}</p></Notice>}
     <section className="card class-picker"><div className="class-picker-label"><span className="feature-icon"><Icon name="school" size={24} /></span><div><label htmlFor="class-select">Lớp học</label><p>Chọn lớp để xem thông tin</p></div></div>
       {classes.length > 0 ? <select id="class-select" value={selected} disabled={loading} onChange={e => setSelected(e.target.value)}>{classes.map(c => <option key={c.classId} value={c.classId}>{c.subjectCode} · {c.classCode} · {c.semester}</option>)}</select> : <span className="muted picker-placeholder">{loading ? 'Đang tải danh sách lớp…' : 'Chưa có dữ liệu lớp'}</span>}
@@ -31,11 +47,12 @@ export default function Student({ user }) {
     </section>
     {loading ? <section className="card"><Skeleton label="Đang tải lớp học…"/></section> : !classes.length ? !error && <section className="card"><EmptyState icon="school" title="Lớp học của bạn sẽ xuất hiện tại đây">Chưa có lớp học. Hãy nhờ giảng viên kiểm tra email và danh sách lớp của bạn.</EmptyState></section> : <>
       <div className="workspace-heading"><div className="tabs" aria-label="Thông tin lớp học">
-        <button className={tab === 'grades' ? 'tab active' : 'tab'} aria-pressed={tab === 'grades'} onClick={() => setTab('grades')}><Icon name="book" />Điểm đã công bố</button>
-        <button className={tab === 'leave' ? 'tab active' : 'tab'} aria-pressed={tab === 'leave'} onClick={() => setTab('leave')}><Icon name="calendar" />Xin nghỉ</button>
-        <button className={tab === 'groups' ? 'tab active' : 'tab'} aria-pressed={tab === 'groups'} onClick={() => setTab('groups')}><Icon name="school" />Nhóm học tập</button>
+        <button className={tab === 'grades' ? 'tab active' : 'tab'} aria-pressed={tab === 'grades'} onClick={() => selectTab('grades')}><Icon name="book" />Điểm đã công bố</button>
+        <button className={tab === 'leave' ? 'tab active' : 'tab'} aria-pressed={tab === 'leave'} onClick={() => selectTab('leave')}><Icon name="calendar" />Xin nghỉ</button>
+        <button className={tab === 'groups' ? 'tab active' : 'tab'} aria-pressed={tab === 'groups'} onClick={() => selectTab('groups')}><Icon name="school" />Nhóm học tập</button>
       </div><span className="class-context"><span className="term-badge">{cls?.semester}</span>{cls?.classCode}</span></div>
       {selected && (tab === 'groups' ? <StudyGroups key={`${user.uid}/${selected}`} classId={selected} /> : tab === 'grades' ? <PublishedGrades key={`${user.uid}/${selected}`} classId={selected} /> : <LeaveRequests key={`${user.uid}/${selected}`} classId={selected} />)}
+    </>}
     </>}
   </main>;
 }

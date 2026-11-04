@@ -15,6 +15,8 @@ const messages = {
   RATE_LIMITED: 'Bạn thao tác quá nhanh. Hãy chờ một lát rồi thử lại.',
   INVALID_REASON: 'Lý do xin nghỉ cần từ 10 đến 1000 ký tự.',
   GROUP_ACCESS_DENIED: 'Bạn không còn thuộc nhóm này. Hãy tải lại nhóm.',
+  GROUP_TASKS_SETUP_REQUIRED: 'Giảng viên cần cập nhật backend để bật thông báo giao việc.',
+  INVALID_CURSOR: 'Danh sách đã thay đổi. Hãy tải lại thông báo.',
   GROUP_FILES_NOT_CONFIGURED: 'Giảng viên cần cấu hình thư mục tệp nhóm trên backend.',
   GROUP_FOLDER_MUST_BE_PRIVATE: 'Thư mục tệp nhóm phải được đặt riêng tư.',
   FILE_TOO_LARGE: 'Tệp đính kèm tối đa 500 KB.',
@@ -36,7 +38,11 @@ export async function portalCall(method, data = {}) {
     });
     if (!response.ok) throw new Error('Không kết nối được máy chủ. Hãy thử lại.');
     const result = await response.json();
-    if (result.ok !== true) throw new Error(messages[result.error] || result.error || 'Yêu cầu thất bại.');
+    if (result.ok !== true) {
+      const error = new Error(messages[result.error] || result.error || 'Yêu cầu thất bại.');
+      error.code = result.error;
+      throw error;
+    }
     return result.data;
   } catch (e) {
     if (e.name === 'AbortError') throw new Error('Máy chủ phản hồi chậm. Hãy tải lại để kiểm tra kết quả trước khi gửi lại.');

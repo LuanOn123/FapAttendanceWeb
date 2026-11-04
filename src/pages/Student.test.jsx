@@ -7,8 +7,9 @@ vi.mock('../lib/api.js', () => ({ portalCall: mocks.call, portalEndpoint: 'https
 import Student from './Student.jsx';
 const classes = [{ classId: 'c1', semester: 'FA26', subjectCode: 'PRM393', classCode: 'SE1' }];
 const user = { uid: 'u1' };
+const mockApi = fn => mocks.call.mockImplementation((method, data) => method === 'listMyTaskNotifications' ? Promise.resolve({ notifications: [], unreadCount: 0, older: null }) : fn(method, data));
 afterEach(cleanup);
-beforeEach(() => { mocks.call.mockReset(); });
+beforeEach(() => { mocks.call.mockReset(); window.history.replaceState(null, '', '/'); });
 describe('student portal', () => {
   it('shows a load error without incorrectly claiming the student has no classes', async () => {
     mocks.call.mockRejectedValue(new Error('Backend chưa được cấu hình cho cổng sinh viên.'));
@@ -18,20 +19,20 @@ describe('student portal', () => {
     expect(screen.getByRole('button', { name: 'Tải lại lớp' }).disabled).toBe(false);
   });
   it('shows unpublished state and never requests a draft API', async () => {
-    mocks.call.mockImplementation(async method => method === 'listClasses' ? classes : { published: false });
+    mockApi(async method => method === 'listClasses' ? classes : { published: false });
     render(<Student user={user} />);
     expect(await screen.findByText('Giảng viên chưa công bố điểm.')).toBeTruthy();
-    expect(mocks.call.mock.calls.map(c => c[0])).toEqual(['listClasses', 'getMyPublishedGrades']);
+    expect(mocks.call.mock.calls.map(c => c[0])).toEqual(['listMyTaskNotifications', 'listClasses', 'getMyPublishedGrades']);
   });
   it('renders zero as a grade and only the returned student snapshot', async () => {
-    mocks.call.mockImplementation(async method => method === 'listClasses' ? classes : { published: true, components: [{ id: 'p', name: 'PE', maxScore: 10 }], grades: { p: 0 }, publishedAt: '2026-10-24T01:00:00Z', version: 1 });
+    mockApi(async method => method === 'listClasses' ? classes : { published: true, components: [{ id: 'p', name: 'PE', maxScore: 10 }], grades: { p: 0 }, publishedAt: '2026-10-24T01:00:00Z', version: 1 });
     render(<Student user={user} />);
     expect(await screen.findByRole('cell', { name: '0' })).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
   });
   it('submits a future occurrence with an idempotency key and shows pending history', async () => {
     let submitted = false;
-    mocks.call.mockImplementation(async (method, data) => {
+    mockApi(async (method, data) => {
       if (method === 'listClasses') return classes;
       if (method === 'getMyPublishedGrades') return { published: false };
       if (method === 'listOccurrences') return [{ occurrenceId: 'o1', slot: 1, scheduledStartTime: '09:00', scheduledEndTime: '10:30', room: 'A1' }];
@@ -50,7 +51,7 @@ describe('student portal', () => {
   });
   it('does not display a stale grade response after switching classes', async () => {
     let resolveOld;
-    mocks.call.mockImplementation(async (method, data) => {
+    mockApi(async (method, data) => {
       if (method === 'listClasses') return [...classes, { ...classes[0], classId: 'c2', classCode: 'SE2' }];
       if (data.classId === 'c1') return new Promise(resolve => { resolveOld = resolve; });
       return { published: false };

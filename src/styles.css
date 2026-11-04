@@ -261,3 +261,21 @@ button.tab.active { background: var(--brand-soft); color: var(--brand-dark); }
 .chat-notice { padding:12px 24px 0; }.chat-notice .notice { margin:0; }.chat-sync-error { padding:9px 24px;background:#fff4ec;font-size:12px;display:flex;gap:10px;align-items:center;justify-content:space-between; }.chat-sync-error button { padding:4px 10px;min-height:28px;font-size:11px; }.pending-discard { margin:12px 24px;font-size:11px; }
 @media(max-width:600px){.tabs{grid-template-columns:repeat(3,minmax(0,1fr));}.tabs .tab{font-size:11px;padding:9px 4px;gap:5px;}.tabs .tab .icon{width:15px;height:15px;}.chat-heading{padding:16px;gap:10px;}.chat-heading h2{font-size:17px;}.chat-group-avatar{width:43px;height:43px;border-radius:13px;}.chat-toolbar{padding:9px 16px;font-size:10px;}.chat-toolbar>span:first-child{max-width:100%;}.conversation{padding:10px 12px 20px;height:clamp(360px,55vh,560px);}.message-content{max-width:84%;}.message-row{gap:7px;}.message-avatar{width:27px;height:27px;font-size:9px;}.message-bubble{padding:9px 11px 7px;}.message-bubble>p{font-size:13px;}.message-meta{font-size:9px;gap:6px;}.chat-composer{padding:12px 14px 10px;}.composer-hint{font-size:9px;}.send-message{padding:8px 10px;font-size:11px;}.chat-file{min-width:0;max-width:100%;padding:9px;gap:7px;}.chat-file strong{font-size:11px;}.chat-file>.icon{display:none;}.chat-members{padding:16px;grid-template-columns:1fr;}.chat-members .avatar{display:grid;}.chat-notice{padding:10px 12px 0;}.skeleton-chat{padding:10px 14px;}.sk-intro{width:85%;}}
 @media(prefers-reduced-motion:reduce){.sk::after{animation:none;}.sk{background:#eee6df;}}
+/* Group assignment notifications use the existing portal palette and controls. */
+.task-shortcut{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 20px}
+.task-notifications{min-width:0}
+.task-notifications .card-heading{flex-wrap:wrap;gap:16px}
+.task-filters{display:flex;gap:8px;margin:18px 0}
+.task-filters button{border:1px solid #e3e8ee;background:#fff;border-radius:20px;padding:8px 16px;color:inherit;font:inherit;cursor:pointer}
+.task-filters button[aria-pressed=true]{background:#fff0e2;border-color:#e9b18b;color:#9b420c}
+.task-notification{border:1px solid #e3e8ee;border-radius:16px;padding:20px;margin:14px 0;overflow-wrap:anywhere}
+.task-notification.is-unread{border-left:4px solid #e9670e;background:#fffcf9}
+.task-notification-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;color:#64748b}
+.task-open{display:flex;justify-content:space-between;align-items:center;gap:16px;text-align:left;width:100%;border:0;background:transparent;color:inherit;padding:8px 0;cursor:pointer;font:inherit}
+.task-open h3{margin:0;font-size:18px;overflow-wrap:anywhere}
+.task-open .icon{flex-shrink:0}
+.task-open[aria-expanded=true]>.icon{transform:rotate(180deg)}
+.task-deadline{display:flex;align-items:center;gap:8px;font-size:13px;color:#64748b}
+.task-body{border-top:1px solid #e3e8ee;margin-top:14px;padding-top:8px;line-height:1.7}
+.task-body>button{margin-top:12px}
+@media(max-width:600px){.task-notification{padding:14px}.task-shortcut>button{min-height:44px}.task-notifications .card-heading h2{font-size:21px}}
