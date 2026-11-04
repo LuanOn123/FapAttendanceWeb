@@ -11,6 +11,18 @@ const mockApi = fn => mocks.call.mockImplementation((method, data) => method ===
 afterEach(cleanup);
 beforeEach(() => { mocks.call.mockReset(); window.history.replaceState(null, '', '/'); });
 describe('student portal', () => {
+  it('offers the student calculator without calling write APIs and resets inputs on class change', async () => {
+    mockApi(async method => method === 'listClasses' ? [...classes, { ...classes[0], classId: 'c2', classCode: 'SE2' }] : { published: false });
+    const events = userEvent.setup(); render(<Student user={user} />);
+    await screen.findByText('Giảng viên chưa công bố điểm.');
+    const calls = mocks.call.mock.calls.length;
+    await events.click(screen.getByRole('button', { name: 'Tính điểm FE/PE' }));
+    await events.type(screen.getByLabelText('Điểm cột 1 / 10'), '8,5');
+    expect(mocks.call.mock.calls).toHaveLength(calls);
+    await events.selectOptions(screen.getByRole('combobox', { name: 'Lớp học' }), 'c2');
+    expect(screen.getByLabelText('Điểm cột 1 / 10').value).toBe('');
+    expect(mocks.call.mock.calls).toHaveLength(calls);
+  });
   it('shows a load error without incorrectly claiming the student has no classes', async () => {
     mocks.call.mockRejectedValue(new Error('Backend chưa được cấu hình cho cổng sinh viên.'));
     render(<Student user={user} />);

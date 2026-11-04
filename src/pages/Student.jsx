@@ -4,6 +4,7 @@ import Icon from '../components/Icon.jsx';
 import StudyGroups from './StudyGroups.jsx';
 import TaskNotifications, { useTaskNotifications } from './TaskNotifications.jsx';
 import Skeleton from '../components/Skeleton.jsx';
+import GradeForecast from './GradeForecast.jsx';
 import { EmptyState, Notice } from '../components/PortalShell.jsx';
 
 const localTime = value => new Date(value).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -50,8 +51,9 @@ export default function Student({ user }) {
         <button className={tab === 'grades' ? 'tab active' : 'tab'} aria-pressed={tab === 'grades'} onClick={() => selectTab('grades')}><Icon name="book" />Điểm đã công bố</button>
         <button className={tab === 'leave' ? 'tab active' : 'tab'} aria-pressed={tab === 'leave'} onClick={() => selectTab('leave')}><Icon name="calendar" />Xin nghỉ</button>
         <button className={tab === 'groups' ? 'tab active' : 'tab'} aria-pressed={tab === 'groups'} onClick={() => selectTab('groups')}><Icon name="school" />Nhóm học tập</button>
+        <button className={tab === 'forecast' ? 'tab active' : 'tab'} aria-pressed={tab === 'forecast'} onClick={() => selectTab('forecast')}><Icon name="spark" />Tính điểm FE/PE</button>
       </div><span className="class-context"><span className="term-badge">{cls?.semester}</span>{cls?.classCode}</span></div>
-      {selected && (tab === 'groups' ? <StudyGroups key={`${user.uid}/${selected}`} classId={selected} /> : tab === 'grades' ? <PublishedGrades key={`${user.uid}/${selected}`} classId={selected} /> : <LeaveRequests key={`${user.uid}/${selected}`} classId={selected} />)}
+      {selected && (tab === 'forecast' ? <GradeForecast key={`${user.uid}/${selected}`} /> : tab === 'groups' ? <StudyGroups key={`${user.uid}/${selected}`} classId={selected} /> : tab === 'grades' ? <PublishedGrades key={`${user.uid}/${selected}`} classId={selected} /> : <LeaveRequests key={`${user.uid}/${selected}`} classId={selected} />)}
     </>}
     </>}
   </main>;
