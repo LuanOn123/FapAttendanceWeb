@@ -1,12 +1,13 @@
 import React from 'react';
 import {afterEach,beforeEach,it,expect,vi} from 'vitest';
-import {cleanup,render,screen,waitFor} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 const mocks=vi.hoisted(()=>({call:vi.fn()}));
 vi.mock('../lib/api.js',()=>({portalCall:mocks.call}));
 import StudyGroups from './StudyGroups.jsx';
 import {chatTime,messageStatus,visibleMessageRect} from '../lib/chat.js';
 afterEach(cleanup);
+afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
 beforeEach(()=>{mocks.call.mockReset();});
 const plan={groups:[{id:'g1',name:'Nhóm 1',memberIds:['s1']}],students:[{studentId:'s1',fullName:'Student one',studentCode:'SE1'}]};
 it('shows assigned group and server-authorized members; never requests full roster',async()=>{
@@ -86,4 +87,65 @@ it('never presents a signup link pointing outside Google Sheets',async()=>{
  mocks.call.mockImplementation(async method=>method==='getGroupSignupSheet'?{state:'OPEN',url:'https://evil.test/'}:{groups:[],students:[]});
  render(<StudyGroups classId="c1"/>);await screen.findByText('Bạn chưa được xếp nhóm');
  expect(screen.queryByRole('link',{name:/Chọn nhóm trên Google Sheets/})).toBeNull();
+});
+it('automatically adopts a newly assigned group on the 15-second plan poll',async()=>{
+ vi.useFakeTimers();vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ let current={version:1,groups:[],students:[]};
+ mocks.call.mockImplementation(async method=>method==='getGroupPlan'?current:method==='getGroupSignupSheet'?null:{messages:[],older:null});
+ await act(async()=>{render(<StudyGroups classId="c1"/>);});
+ expect(screen.getByText('Bạn chưa được xếp nhóm')).toBeTruthy();
+ current={...plan,version:2};
+ await act(async()=>{vi.advanceTimersByTime(15000);});
+ expect(screen.getByRole('heading',{name:'Nhóm 1'})).toBeTruthy();
+ expect(mocks.call).toHaveBeenCalledWith('getGroupMessages',{classId:'c1',groupId:'g1'});
+});
+it('keeps text and attachment when a newer plan arrives, and blocks old-group sending',async()=>{
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ let current={...plan,version:1};
+ mocks.call.mockImplementation(async method=>method==='getGroupPlan'?current:method==='getGroupSignupSheet'?null:{messages:[],older:null});
+ const events=userEvent.setup();render(<StudyGroups classId="c1"/>);await screen.findByText('Nhóm 1');
+ await events.type(screen.getByRole('textbox',{name:'Tin nhắn cho nhóm'}),'Giữ bản nháp');
+ await events.upload(screen.getByLabelText('Tệp đính kèm nhóm'),new File(['abc'],'draft.pdf',{type:'application/pdf'}));await screen.findByText('draft.pdf');
+ current={...plan,version:2,groups:[{...plan.groups[0],id:'g2',name:'Nhóm mới'}]};
+ fireEvent(document,new Event('visibilitychange'));
+ await screen.findByText(/Nhóm đã thay đổi/);
+ expect(screen.getByRole('textbox',{name:'Tin nhắn cho nhóm'}).value).toBe('Giữ bản nháp');
+ expect(screen.getByText('draft.pdf')).toBeTruthy();expect(screen.getByRole('button',{name:'Gửi kèm file'}).disabled).toBe(true);
+ expect(mocks.call.mock.calls.some(c=>c[0]==='sendGroupMessage')).toBe(false);
+ const confirm=vi.spyOn(window,'confirm').mockReturnValue(false);
+ await events.click(screen.getByRole('button',{name:'Kiểm tra nhóm mới'}));expect(confirm).toHaveBeenCalled();
+ expect(screen.getByText('draft.pdf')).toBeTruthy();
+ confirm.mockReturnValue(true);await events.click(screen.getByRole('button',{name:'Kiểm tra nhóm mới'}));
+ await screen.findByRole('heading',{name:'Nhóm mới'});expect(screen.queryByText('draft.pdf')).toBeNull();
+});
+it('does not apply a stale plan response after switching classes',async()=>{
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ let pending,reads=0;
+ mocks.call.mockImplementation(async(method,data)=>{
+  if(method==='getGroupSignupSheet')return null;
+  if(method==='getGroupPlan'){
+   if(data.classId==='c2')return {...plan,version:3,groups:[{...plan.groups[0],id:'g2',name:'Lớp mới'}]};
+   if(++reads===1)return {...plan,version:1};
+   return new Promise(resolve=>{pending=resolve;});
+  }return {messages:[],older:null};
+ });
+ const view=render(<StudyGroups classId="c1"/>);await screen.findByText('Nhóm 1');fireEvent(document,new Event('visibilitychange'));
+ await waitFor(()=>expect(pending).toBeTypeOf('function'));view.rerender(<StudyGroups classId="c2"/>);await screen.findByText('Lớp mới');
+ await act(async()=>pending({...plan,version:9,groups:[{...plan.groups[0],name:'Cũ'}]}));
+ expect(screen.queryByText('Cũ')).toBeNull();expect(screen.getByRole('heading',{name:'Lớp mới'})).toBeTruthy();
+});
+it('hides old messages and visible member data after server revokes access while retaining the draft',async()=>{
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);let revoked=false;
+ mocks.call.mockImplementation(async method=>{
+  if(method==='getGroupPlan'){if(revoked)throw Object.assign(Error('Quyền đã thay đổi'),{code:'NOT_ENROLLED'});return {...plan,version:1};}
+  if(method==='getGroupSignupSheet')return null;
+  return {messages:[{id:'old',mine:false,text:'Tin cũ',senderName:'Bạn cũ'}],older:null};
+ });
+ const events=userEvent.setup();render(<StudyGroups classId="c1"/>);await screen.findByText('Tin cũ');
+ await events.click(screen.getByRole('button',{name:/1 thành viên/}));expect(screen.getByText('Student one')).toBeTruthy();
+ await events.type(screen.getByRole('textbox',{name:'Tin nhắn cho nhóm'}),'Bản nháp');revoked=true;
+ fireEvent(document,new Event('visibilitychange'));await screen.findByText(/Quyền truy cập đã thay đổi/);
+ expect(screen.queryByText('Tin cũ')).toBeNull();expect(screen.queryByText('Student one')).toBeNull();
+ expect(screen.getByRole('textbox',{name:'Tin nhắn cho nhóm'}).value).toBe('Bản nháp');
+ expect(screen.getByRole('button',{name:'Gửi tin nhắn'}).disabled).toBe(true);
 });
