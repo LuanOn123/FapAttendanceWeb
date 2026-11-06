@@ -16,16 +16,19 @@ export function forecastGrades(rows) {
     const label = `Cột ${index + 1}`, kind = row.kind;
     const weight = parseGradeNumber(row.weight), text = String(row.score ?? '').trim();
     const score = text === '' ? null : parseGradeNumber(text);
+    const minimum = parseGradeNumber(row.minimum ?? '0');
     if (!['known', 'FE', 'PE'].includes(kind)) errors.push(`${label}: chọn loại điểm hợp lệ.`);
     if (!String(row.name ?? '').trim() || String(row.name).length > 80) errors.push(`${label}: nhập tên tối đa 80 ký tự.`);
     if (weight == null || weight <= 0 || weight > 10000) errors.push(`${label}: trọng số phải lớn hơn 0 và không quá 100%.`);
     if (text !== '' && (score == null || score > 1000)) errors.push(`${label}: điểm phải từ 0 đến 10, tối đa 2 chữ số thập phân.`);
     if (kind === 'known' && text === '') errors.push(`${label}: nhập điểm đã có; chỉ FE/PE được để trống để tính.`);
     if (kind === 'FE' || kind === 'PE') {
+      if (minimum == null || minimum < 0 || minimum > 1000) errors.push(`${label}: điểm tối thiểu ${kind} phải từ 0 đến 10.`);
+      else if (score != null && score < minimum) errors.push(`${kind} đang dưới ngưỡng ${minimum / 100} theo đề cương đã nhập. Xóa điểm bài thi để tính mức cần đạt.`);
       if (examTypes.has(kind)) errors.push(`Chỉ được có một cột ${kind}.`);
       examTypes.add(kind);
     }
-    normalized.push({ ...row, weight, score });
+    normalized.push({ ...row, weight, score, minimum: minimum ?? 0 });
   });
   const totalWeight = normalized.reduce((sum, row) => sum + (row.weight ?? 0), 0);
   if (totalWeight !== 10000) errors.push(`Tổng trọng số phải đúng 100% (hiện tại ${totalWeight / 100}%).`);
@@ -38,20 +41,21 @@ export function forecastGrades(rows) {
   if (maximum <= PASS) return { ...result, status: 'impossible' };
   // Recommend attainable exam marks in increments of 0.1; strict comparison avoids
   // recommending an equality boundary such as exactly 5.0 overall.
-  function minimum(extraBase, weight) {
+  function minimum(extraBase, weight, floor = 0) {
     for (let tenth = 0; tenth <= 100; tenth++) {
-      if (extraBase + tenth * 10 * weight > PASS) return tenth / 10;
+      if (tenth * 10 >= floor && extraBase + tenth * 10 * weight > PASS) return tenth / 10;
     }
     return null;
   }
   if (unknown.length === 1) {
-    const exam = unknown[0], needed = minimum(base, exam.weight);
+    const exam = unknown[0], needed = minimum(base, exam.weight, exam.minimum);
     return { ...result, status: 'single', exam: exam.kind, needed, total: (base + Math.round(needed * 100) * exam.weight) / SCALE };
   }
   const fe = unknown.find(row => row.kind === 'FE'), pe = unknown.find(row => row.kind === 'PE');
-  const sameScore = minimum(base, fe.weight + pe.weight);
+  const sameScore = minimum(base, fe.weight + pe.weight, Math.max(fe.minimum, pe.minimum));
   const scenarios = Array.from({ length: 11 }, (_, peScore) => {
-    const feScore = minimum(base + peScore * 100 * pe.weight, fe.weight);
+    if (peScore * 100 < pe.minimum) return { pe: peScore, fe: null, total: null, reason: 'PE dưới ngưỡng đã nhập' };
+    const feScore = minimum(base + peScore * 100 * pe.weight, fe.weight, fe.minimum);
     return { pe: peScore, fe: feScore, total: feScore == null ? null : (base + peScore * 100 * pe.weight + Math.round(feScore * 100) * fe.weight) / SCALE };
   });
   return { ...result, status: 'pair', sameScore, scenarios, total: (base + Math.round(sameScore * 100) * (fe.weight + pe.weight)) / SCALE };

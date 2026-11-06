@@ -3,6 +3,13 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import GradeForecast from './GradeForecast.jsx';
 afterEach(cleanup);
+it('uses the editable syllabus exam minimum when coursework already exceeds five', async () => {
+  const events=userEvent.setup();render(<GradeForecast />);await fill(events);
+  for(let i=1;i<=3;i++){await events.clear(screen.getByLabelText(`Điểm cột ${i} / 10`));await events.type(screen.getByLabelText(`Điểm cột ${i} / 10`),'9');}
+  const minimum=screen.getByLabelText('Điểm tối thiểu FE (theo đề cương)');await events.clear(minimum);await events.type(minimum,'4,05');
+  await events.click(screen.getByRole('button',{name:'Tính điểm cần đạt'}));
+  expect(screen.getByRole('heading',{name:'FE cần ít nhất 4,1 / 10'})).toBeTruthy();
+});
 async function fill(events) {
   for (let index = 1; index <= 3; index++) {
     await events.type(screen.getByLabelText(`Trọng số cột ${index} (%)`), '20');
