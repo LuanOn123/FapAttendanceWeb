@@ -5,46 +5,103 @@ import Skeleton from '../components/Skeleton.jsx';
 import Icon from '../components/Icon.jsx';
 import { chatTime, chatDate, initials, mergeMessages, messageStatus, visibleMessageRect } from '../lib/chat.js';
 
+const accessDenied = error => ['GROUP_ACCESS_DENIED', 'NOT_ENROLLED', 'UNAUTHENTICATED', 'PERMISSION_DENIED'].includes(error.code)
+  || /không còn thuộc nhóm này|chưa được ghi danh|Phiên đăng nhập hết hạn/.test(error.message);
+
 export default function StudyGroups({ classId }) {
   const [plan,setPlan]=useState(null),[groupId,setGroupId]=useState(''),[messages,setMessages]=useState([]),[loadingPlan,setLoadingPlan]=useState(true),[loadingChat,setLoadingChat]=useState(false);
   const [text,setText]=useState(''),[file,setFile]=useState(null),[error,setError]=useState(''),[sending,setSending]=useState(false),[reading,setReading]=useState(false),[downloadId,setDownloadId]=useState(''),[older,setOlder]=useState(null),[paging,setPaging]=useState(false),[outbox,setOutbox]=useState(null),[showMembers,setShowMembers]=useState(false),[newCount,setNewCount]=useState(0),[syncError,setSyncError]=useState('');
-  const pending=useRef(null),viewport=useRef(null),input=useRef(null),generation=useRef(0),polling=useRef(false),nearBottom=useRef(true),tracking=useRef(false),readIds=useRef(new Set()),acknowledged=useRef(new Set()),ackBusy=useRef(false),refreshChat=useRef(null);
+  const pending=useRef(null),viewport=useRef(null),input=useRef(null),generation=useRef(0),nearBottom=useRef(true),tracking=useRef(false),readIds=useRef(new Set()),acknowledged=useRef(new Set()),ackBusy=useRef(false),refreshChat=useRef(null);
   const knownIds=useRef(new Set());
   const [signup,setSignup]=useState(null);
   const fileReader=useRef(null);
+  const [membershipChange,setMembershipChange]=useState('');
+  const blocked=useRef(false), latest=useRef(null);
+  const adoptPlan=useCallback(next=>{
+    generation.current++;
+    blocked.current=false;
+    tracking.current=false;
+    nearBottom.current=true;
+    setMembershipChange('');
+    setMessages([]);
+    setShowMembers(false);
+    setOlder(null);
+    setNewCount(0);
+    setPaging(false);
+    setDownloadId('');
+    setSyncError('');
+    setError('');
+    setPlan(next);
+    setGroupId(next.groups[0]?.id||'');
+  },[]);
+  const suspendChat=useCallback(reason=>{
+    blocked.current=true;
+    tracking.current=false;
+    setMessages([]);
+    setShowMembers(false);
+    setMembershipChange(reason);
+  },[]);
   const loadPlan=useCallback(async()=>{
-    const epoch=++generation.current;fileReader.current?.abort();fileReader.current=null;setReading(false);setFile(null);setText('');if(input.current)input.current.value='';setLoadingPlan(true);setError('');setMessages([]);setPlan(null);setGroupId('');setOutbox(null);setSignup(null);tracking.current=false;
+    const epoch=++generation.current;blocked.current=true;pending.current=null;setMembershipChange('');setSending(false);fileReader.current?.abort();fileReader.current=null;setReading(false);setFile(null);setText('');if(input.current)input.current.value='';setLoadingPlan(true);setError('');setMessages([]);setPlan(null);setGroupId('');setOutbox(null);setSignup(null);tracking.current=false;
     portalCall('getGroupSignupSheet',{classId}).then(r=>{if(epoch===generation.current)setSignup(r);}).catch(()=>{});
-    try { const p=await portalCall('getGroupPlan',{classId});if(epoch!==generation.current)return;setPlan(p);setGroupId(p.groups[0]?.id||''); }
+    try { const p=await portalCall('getGroupPlan',{classId});if(epoch!==generation.current)return;blocked.current=false;setSyncError('');setShowMembers(false);setDownloadId('');setPaging(false);setPlan(p);setGroupId(p.groups[0]?.id||''); }
     catch(e){if(epoch===generation.current)setError(e.message);}finally{if(epoch===generation.current)setLoadingPlan(false);}
   },[classId]);
   useEffect(()=>{loadPlan();return()=>{generation.current++;fileReader.current?.abort();fileReader.current=null;};},[loadPlan]);
+  useEffect(()=>{
+    latest.current={plan,groupId,hasDraft:!!(text||file||reading||sending),membershipChange};
+  },[plan,groupId,text,file,reading,sending,membershipChange]);
+  useEffect(()=>{
+    let live=true, refreshing=false;
+    async function refreshPlan(){
+      if(document.hidden||refreshing||!latest.current?.plan)return;
+      refreshing=true;
+      const epoch=generation.current;
+      try {
+        const next=await portalCall('getGroupPlan',{classId});
+        if(!live||epoch!==generation.current)return;
+        const state=latest.current;
+        if((next.groups[0]?.id||'')===state.groupId){
+          if(!blocked.current)setPlan(next);
+          return;
+        }
+        if(state.hasDraft||pending.current||state.membershipChange){
+          suspendChat('Nhóm của bạn đã thay đổi. Hội thoại cũ đã được đóng.');
+        }else adoptPlan(next);
+      }catch(e){
+        if(live&&epoch===generation.current&&accessDenied(e))suspendChat(e.message);
+      }finally{refreshing=false;}
+    }
+    const timer=setInterval(refreshPlan,15000);
+    document.addEventListener('visibilitychange',refreshPlan);
+    return()=>{live=false;clearInterval(timer);document.removeEventListener('visibilitychange',refreshPlan);};
+  },[classId,adoptPlan,suspendChat]);
   const scrollEnd=useCallback(()=>{if(viewport.current)viewport.current.scrollTop=viewport.current.scrollHeight;nearBottom.current=true;setNewCount(0);},[]);
   const acknowledge=useCallback(async(ids,seen=false)=>{
-    if(!tracking.current||!groupId||!ids.length)return;
+    if(blocked.current||!tracking.current||!groupId||!ids.length)return;
     const values=ids.filter(id=>!acknowledged.current.has(`${seen?'r':'d'}:${id}`)).slice(-50);if(!values.length)return;
     try { await portalCall('ackGroupMessages',{classId,groupId,deliveredIds:values,readIds:seen?values:[]});for(const id of values)acknowledged.current.add(`${seen?'r':'d'}:${id}`); }
     catch { /* Never infer delivery/read from a failed acknowledgement. */ }
   },[classId,groupId]);
   useEffect(()=>{
-    if(!groupId)return;
-    const epoch=generation.current;let live=true,first=true;acknowledged.current=new Set();readIds.current=new Set();knownIds.current=new Set();setLoadingChat(true);setOlder(null);
+    if(!groupId||membershipChange)return;
+    const epoch=generation.current;let live=true,first=true,polling=false;acknowledged.current=new Set();readIds.current=new Set();knownIds.current=new Set();setLoadingChat(true);setOlder(null);
     const read=async()=>{
-      if(polling.current||document.hidden)return;polling.current=true;
+      if(blocked.current||polling||document.hidden)return;polling=true;
       try {
-        const r=await portalCall('getGroupMessages',{classId,groupId});if(!live||epoch!==generation.current)return;
+        const r=await portalCall('getGroupMessages',{classId,groupId});if(blocked.current||!live||epoch!==generation.current)return;
         tracking.current=r.receiptTracking===true;
         setMessages(old=>mergeMessages(old,r.messages));
         const fresh=r.messages.filter(m=>!knownIds.current.has(m.id));for(const m of r.messages)knownIds.current.add(m.id);
         if(!first&&!nearBottom.current&&fresh.length)setNewCount(n=>n+fresh.length);
         if(first)setOlder(r.older);first=false;setLoadingChat(false);setSyncError('');
         await acknowledge(r.messages.filter(m=>!m.mine).map(m=>m.id));
-      } catch(e) {if(live){setSyncError(e.message);setLoadingChat(false);if(/nhóm này|GROUP_ACCESS_DENIED|NOT_ENROLLED|UNAUTHENTICATED/.test(e.message))setMessages([]);}}
-      finally{polling.current=false;}
+      } catch(e) {if(live&&epoch===generation.current&&!blocked.current){setSyncError(e.message);setLoadingChat(false);if(accessDenied(e))suspendChat(e.message);}}
+      finally{polling=false;}
     };
     refreshChat.current=read;read();const timer=setInterval(read,10000);const resume=()=>{if(!document.hidden)read();};document.addEventListener('visibilitychange',resume);
     return()=>{live=false;clearInterval(timer);document.removeEventListener('visibilitychange',resume);refreshChat.current=null;};
-  },[classId,groupId,acknowledge]);
+  },[classId,groupId,acknowledge,membershipChange,suspendChat]);
   useEffect(()=>{if(nearBottom.current)scrollEnd();},[messages.length,outbox?.id,scrollEnd]);
   useEffect(()=>{
     if(!viewport.current||typeof IntersectionObserver==='undefined')return;
@@ -54,7 +111,7 @@ export default function StudyGroups({ classId }) {
     return()=>{observer.disconnect();clearInterval(flush);readIds.current.clear();};
   },[messages,acknowledge]);
   async function chooseFile(e){
-    if(sending||reading||pending.current)return;
+    if(blocked.current||sending||reading||pending.current)return;
     const chosen=e.target.files[0];setError('');if(!chosen)return;
     if(chosen.size>512000||chosen.size===0||chosen.name.length>120||/[\x00-\x1f\\/]/.test(chosen.name)||!/\.(pdf|txt|png|jpe?g|xlsx|docx|csv)$/i.test(chosen.name)){setError('Chọn PDF, ảnh, Word, Excel, TXT hoặc CSV có nội dung, tối đa 500 KB; tên tối đa 120 ký tự.');e.target.value='';return;}
     setReading(true);const epoch=generation.current,reader=new FileReader();fileReader.current=reader;
@@ -63,7 +120,7 @@ export default function StudyGroups({ classId }) {
     reader.readAsDataURL(chosen);
   }
   async function send(e){
-    e?.preventDefault();if(sending||reading||(!pending.current&&!text.trim()&&!file))return;
+    e?.preventDefault();if(blocked.current||sending||reading||(!pending.current&&!text.trim()&&!file))return;
     setSending(true);setError('');const epoch=generation.current;
     pending.current||={classId,groupId,text:text.trim(),...(file?{file:{name:file.name,base64:file.base64}}:{}),requestKey:crypto.randomUUID()};
     const payload=pending.current;setOutbox({id:payload.requestKey,text:payload.text,mine:true,hasFile:!!payload.file,fileName:payload.file?.name,localState:'sending'});nearBottom.current=true;
@@ -71,28 +128,39 @@ export default function StudyGroups({ classId }) {
       const r=await portalCall('sendGroupMessage',payload);if(epoch!==generation.current)return;
       if(r.createdAt)setMessages(old=>mergeMessages(old,[{id:r.id,text:payload.text,mine:true,sender:plan.viewerId,senderName:'Bạn',createdAt:r.createdAt,hasFile:!!payload.file,fileName:payload.file?.name,size:file?.size||0}]));
       pending.current=null;setOutbox(null);setText('');setFile(null);if(input.current)input.current.value='';await refreshChat.current?.();
-    }catch(e){if(epoch===generation.current){setError(`${e.message} Tin nhắn được giữ để thử lại cùng mã gửi.`);setOutbox(m=>m?{...m,localState:'uncertain'}:m);}}
+    }catch(e){if(epoch===generation.current){
+      if(accessDenied(e))suspendChat(e.message);
+      else setError(`${e.message} Tin nhắn được giữ để thử lại cùng mã gửi.`);
+      setOutbox(m=>m?{...m,localState:'uncertain'}:m);
+    }}
     finally{if(epoch===generation.current)setSending(false);}
   }
   async function download(m){
-    if(downloadId)return;setDownloadId(m.id);setError('');const epoch=generation.current;
-    try{const f=await portalCall('downloadGroupFile',{classId,groupId,messageId:m.id});if(epoch!==generation.current)return;const bytes=Uint8Array.from(atob(f.base64),c=>c.charCodeAt(0)),url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'})),a=document.createElement('a');a.href=url;a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-    catch(e){if(epoch===generation.current)setError(e.message);}finally{if(epoch===generation.current)setDownloadId('');}
+    if(blocked.current||downloadId)return;setDownloadId(m.id);setError('');const epoch=generation.current;
+    try{const f=await portalCall('downloadGroupFile',{classId,groupId,messageId:m.id});if(blocked.current||epoch!==generation.current)return;const bytes=Uint8Array.from(atob(f.base64),c=>c.charCodeAt(0)),url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'})),a=document.createElement('a');a.href=url;a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+    catch(e){if(epoch===generation.current){if(accessDenied(e))suspendChat(e.message);else setError(e.message);}}finally{if(epoch===generation.current)setDownloadId('');}
   }
   async function previous(){
-    if(paging||!older)return;setPaging(true);const pane=viewport.current,oldHeight=pane?.scrollHeight||0,epoch=generation.current;
-    try{const r=await portalCall('getGroupMessages',{classId,groupId,before:older});if(epoch!==generation.current)return;nearBottom.current=false;setMessages(m=>mergeMessages(r.messages,m));setOlder(r.older);requestAnimationFrame(()=>{if(pane)pane.scrollTop+=pane.scrollHeight-oldHeight;});await acknowledge(r.messages.filter(m=>!m.mine).map(m=>m.id));}
-    catch(e){if(epoch===generation.current)setError(e.message);}finally{if(epoch===generation.current)setPaging(false);}
+    if(blocked.current||paging||!older)return;setPaging(true);const pane=viewport.current,oldHeight=pane?.scrollHeight||0,epoch=generation.current;
+    try{const r=await portalCall('getGroupMessages',{classId,groupId,before:older});if(blocked.current||epoch!==generation.current)return;nearBottom.current=false;setMessages(m=>mergeMessages(r.messages,m));setOlder(r.older);requestAnimationFrame(()=>{if(pane)pane.scrollTop+=pane.scrollHeight-oldHeight;});await acknowledge(r.messages.filter(m=>!m.mine).map(m=>m.id));}
+    catch(e){if(epoch===generation.current){if(accessDenied(e))suspendChat(e.message);else setError(e.message);}}finally{if(epoch===generation.current)setPaging(false);}
   }
-  const group=plan?.groups.find(g=>g.id===groupId),members=plan?.students||[],display=[...messages,...(outbox?[outbox]:[])];
+  const group=membershipChange?null:plan?.groups.find(g=>g.id===groupId),members=group?(plan?.students||[]):[],display=[...messages,...(outbox?[outbox]:[])];
   const signupUrl=signup?.state==='OPEN'&&/^https:\/\/docs\.google\.com\/spreadsheets\/d\/[A-Za-z0-9_-]+\/edit#gid=\d+$/.test(signup.url)?signup.url:null;
   return <section className="card group-workspace chat-workspace" aria-label="Nhóm học tập">
     <header className="chat-heading"><div className="chat-group-avatar"><Icon name="school" size={27}/></div><div className="chat-heading-text"><span className="eyebrow">NHÓM HỌC TẬP</span><h2>{group?.name||'Nhóm học tập của tôi'}</h2><button className="members-toggle" onClick={()=>setShowMembers(s=>!s)} disabled={!group} aria-expanded={showMembers}>{members.length} thành viên <Icon name="chevron" size={14}/></button></div><button className="icon-button" aria-label="Tải lại nhóm" title="Tải lại nhóm" disabled={sending||!!pending.current} onClick={()=>{if((text||file||reading)&&!window.confirm('Bỏ tin nhắn và tệp chưa gửi để tải lại nhóm?'))return;loadPlan();}}><Icon name="refresh"/></button></header>
     {showMembers&&group&&<div className="chat-members">{members.map(s=><div key={s.studentId}><span className="avatar">{initials(s.fullName)}</span><span><strong>{s.fullName}</strong><small>{s.studentCode}</small></span></div>)}</div>}
     {error&&<div className="chat-notice"><Notice>{error}</Notice></div>}
-    {signupUrl&&<div className="group-signup-banner" role="status"><div><strong>Đang mở đăng ký nhóm</strong><p>Chọn nhóm ở dòng MSSV của bạn trên Google Sheets. Chờ cột Đồng bộ xác nhận rồi bấm Tải lại nhóm.</p></div><a href={signupUrl} target="_blank" rel="noreferrer">Chọn nhóm trên Google Sheets <Icon name="arrow" size={16}/></a></div>}
-    {pending.current&&!sending&&<button className="pending-discard" type="button" onClick={()=>{if(!window.confirm('Tin nhắn có thể đã được máy chủ nhận. Bỏ bản chờ và kiểm tra lịch sử trước khi gửi mới?'))return;pending.current=null;setOutbox(null);setText('');setFile(null);loadPlan();}}>Bỏ bản gửi đang chờ và kiểm tra lại</button>}
-    {loadingPlan?<Skeleton kind="chat" label="Đang tải nhóm…"/>:!group?<EmptyState icon="school" title={error?'Chưa tải được nhóm':signupUrl?'Chọn nhóm để bắt đầu':'Bạn chưa được xếp nhóm'}>{error?'Bấm tải lại để kiểm tra nhóm của bạn.':signupUrl?'Mở Sheet đăng ký phía trên, chọn nhóm và đợi xác nhận đồng bộ.':'Giảng viên chưa xếp bạn vào nhóm. Hãy tải lại sau khi giảng viên chia nhóm.'}</EmptyState>:<>
+    {signupUrl&&<div className="group-signup-banner" role="status"><div><strong>Đang mở đăng ký nhóm</strong><p>Chọn nhóm ở dòng MSSV của bạn trên Google Sheets. Chờ cột Đồng bộ xác nhận. Nhóm sẽ tự cập nhật khi bạn quay lại.</p></div><a href={signupUrl} target="_blank" rel="noreferrer">Chọn nhóm trên Google Sheets <Icon name="arrow" size={16}/></a></div>}
+    {pending.current&&!sending&&!membershipChange&&<button className="pending-discard" type="button" onClick={()=>{if(!window.confirm('Tin nhắn có thể đã được máy chủ nhận. Bỏ bản chờ và kiểm tra lịch sử trước khi gửi mới?'))return;pending.current=null;setOutbox(null);setText('');setFile(null);loadPlan();}}>Bỏ bản gửi đang chờ và kiểm tra lại</button>}
+    {loadingPlan?<Skeleton kind="chat" label="Đang tải nhóm…"/> :membershipChange?<div className="chat-notice">
+      <Notice>{membershipChange}</Notice>
+      {(text||file||reading||pending.current)&&<><p>Bản nháp hoặc lượt gửi chưa xác nhận vẫn được giữ. Kiểm tra nội dung trước khi chuyển nhóm.</p>{text&&<p className="preserve-text">{text}</p>}{file&&<p>Tệp: {file.name}</p>}</>}
+      <button type="button" disabled={sending} onClick={()=>{
+        if((text||file||reading||pending.current)&&!window.confirm('Bỏ bản nháp hoặc lượt gửi chưa xác nhận và tải nhóm hiện tại?'))return;
+        loadPlan();
+      }}>Kiểm tra và tải nhóm hiện tại</button>
+    </div>:!group?<EmptyState icon="school" title={error?'Chưa tải được nhóm':signupUrl?'Chọn nhóm để bắt đầu':'Bạn chưa được xếp nhóm'}>{error?'Bấm tải lại để kiểm tra nhóm của bạn.':signupUrl?'Mở Sheet đăng ký phía trên, chọn nhóm và đợi xác nhận đồng bộ.':'Giảng viên chưa xếp bạn vào nhóm. Nhóm sẽ tự cập nhật khi có thay đổi.'}</EmptyState>:<>
       <div className="chat-toolbar"><span><Icon name="shield" size={14}/> Chỉ thành viên nhóm và giảng viên có quyền truy cập</span><span className={syncError?'chat-connection error':'chat-connection'}><i/>{syncError?'Chưa đồng bộ':'Cập nhật mỗi 10 giây'}</span></div>
       {syncError&&<div className="chat-sync-error" role="alert">{syncError}<button onClick={()=>refreshChat.current?.()}>Thử lại</button></div>}
       <div className="conversation" ref={viewport} aria-label="Tin nhắn nhóm" aria-busy={loadingChat} onScroll={()=>{const p=viewport.current;nearBottom.current=p.scrollHeight-p.scrollTop-p.clientHeight<80;if(nearBottom.current)setNewCount(0);}}>

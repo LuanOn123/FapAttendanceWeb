@@ -93,3 +93,13 @@ describe('FE/PE weighted score forecast', () => {
     }
   });
 });
+it('matches the FE and PE floors, including rounding a floor up to the next tenth', () => {
+  const result=forecastGrades([
+    {name:'Quiz',kind:'known',weight:'50',score:'10'},
+    {name:'FE',kind:'FE',weight:'25',score:'',minimum:'4,55'},
+    {name:'PE',kind:'PE',weight:'25',score:'',minimum:'6'},
+  ]);
+  expect(result.sameScore).toBe(6);
+  expect(result.scenarios[5]).toMatchObject({fe:null,reason:'PE dưới ngưỡng đã nhập'});
+  expect(result.scenarios[6].fe).toBe(4.6);
+});

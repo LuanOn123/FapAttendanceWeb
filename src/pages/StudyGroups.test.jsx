@@ -1,6 +1,6 @@
 import React from 'react';
 import {afterEach,beforeEach,it,expect,vi} from 'vitest';
-import {cleanup,render,screen,waitFor} from '@testing-library/react';
+import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 const mocks=vi.hoisted(()=>({call:vi.fn()}));
 vi.mock('../lib/api.js',()=>({portalCall:mocks.call}));
@@ -9,6 +9,41 @@ import {chatTime,messageStatus,visibleMessageRect} from '../lib/chat.js';
 afterEach(cleanup);
 beforeEach(()=>{mocks.call.mockReset();});
 const plan={groups:[{id:'g1',name:'Nhóm 1',memberIds:['s1']}],students:[{studentId:'s1',fullName:'Student one',studentCode:'SE1'}]};
+const nextPlan={groups:[{id:'g2',name:'Nhóm 2',memberIds:['s1']}],students:[]};
+it('picks up a first group on returning to the tab',async()=>{
+ let current={groups:[],students:[]};
+ mocks.call.mockImplementation(async method=>method==='getGroupPlan'?current:{messages:[],older:null});
+ render(<StudyGroups classId="c1"/>);
+ await screen.findByText('Bạn chưa được xếp nhóm');
+ current=nextPlan;
+ fireEvent(document,new Event('visibilitychange'));
+ await screen.findByText('Nhóm 2');
+ await waitFor(()=>expect(mocks.call).toHaveBeenCalledWith('getGroupMessages',{classId:'c1',groupId:'g2'}));
+});
+it('hides the previous conversation on a group change and keeps a draft until confirmation',async()=>{
+ let current=plan;
+ mocks.call.mockImplementation(async (method,data)=>method==='getGroupPlan'?current:{
+   messages:data?.groupId==='g1'?[{id:'old',mine:false,text:'Tin nhóm cũ'}]:[],older:null,
+ });
+ const events=userEvent.setup();
+ render(<StudyGroups classId="c1"/>);
+ await screen.findByText('Tin nhóm cũ');
+ await events.type(screen.getByRole('textbox',{name:'Tin nhắn cho nhóm'}),'Bản nháp riêng');
+ current=nextPlan;
+ fireEvent(document,new Event('visibilitychange'));
+ await screen.findByText('Bản nháp riêng');
+ expect(screen.queryByText('Tin nhóm cũ')).toBeNull();
+ expect(screen.queryByText('Nhóm 2')).toBeNull();
+ const confirm=vi.spyOn(window,'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+ try {
+   const change=screen.getByRole('button',{name:'Kiểm tra và tải nhóm hiện tại'});
+   await events.click(change);
+   expect(screen.getByText('Bản nháp riêng')).toBeTruthy();
+   await events.click(change);
+   await screen.findByText('Nhóm 2');
+   expect(screen.queryByText('Bản nháp riêng')).toBeNull();
+ } finally {confirm.mockRestore();}
+});
 it('shows assigned group and server-authorized members; never requests full roster',async()=>{
  mocks.call.mockImplementation(async method=>method==='getGroupPlan'?plan:{messages:[],older:null});
   const events=userEvent.setup();render(<StudyGroups classId="c1"/>);await screen.findByText('Nhóm 1');await events.click(screen.getByRole('button',{name:/1 thành viên/}));expect(screen.getByText('Student one')).toBeTruthy();expect(screen.getByText('SE1')).toBeTruthy();await waitFor(()=>expect(mocks.call).toHaveBeenCalledWith('getGroupMessages',{classId:'c1',groupId:'g1'}));
