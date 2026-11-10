@@ -4,6 +4,13 @@ import { forecastGrades, parseGradeNumber } from './gradeForecast.js';
 const known = (score, weight, name = 'Quiz') => ({ name, kind: 'known', score, weight });
 const exam = (kind, weight, score = '') => ({ name: kind, kind, score, weight });
 describe('FE/PE weighted score forecast', () => {
+  it('applies user-entered syllabus floors and rejects known exam scores below the floor', () => {
+    expect(forecastGrades([known('9','60'),{...exam('FE','40'),minimum:'4,05'}]).needed).toBe(4.1);
+    expect(forecastGrades([known('9','60'),{...exam('FE','40','3'),minimum:'4'}]).errors.join()).toContain('dưới ngưỡng');
+    const pair=forecastGrades([known('9','60'),{...exam('FE','20'),minimum:'6.02'},{...exam('PE','20'),minimum:'4.05'}]);
+    expect(pair.sameScore).toBe(6.1);expect(pair.scenarios[4].reason).toContain('dưới ngưỡng');expect(pair.scenarios[5].fe).toBe(6.1);
+    expect(forecastGrades([known('9','60'),{...exam('FE','40'),minimum:'11'}]).errors.length).toBeGreaterThan(0);
+  });
   it('uses a strict >5 threshold, and rounds recommendations upward to 0.1', () => {
     const result = forecastGrades([known('5', '60'), exam('FE', '40')]);
     expect(result.errors).toEqual([]);

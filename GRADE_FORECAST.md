@@ -4,7 +4,7 @@ Vào Student Web → chọn lớp → **Tính điểm FE/PE**.
 
 1. Nhập điểm Assignment, PT, Quiz… trên thang 10 và trọng số của từng cột theo syllabus. Thêm/xóa cột khi cần.
 2. Giữ FE hoặc thêm PE, nhập trọng số, để trống điểm bài thi cần tính. Nếu đã có điểm một bài thi thì nhập để cố định điểm đó.
-3. Tổng trọng số phải đúng 100%. Nhấn **Tính điểm cần đạt**.
+3. Nhập ngưỡng FE/PE tối thiểu từ đề cương nếu môn có điều kiện này; 0 nghĩa là không áp dụng ngưỡng riêng. Tổng trọng số phải đúng 100%. Nhấn **Tính điểm cần đạt**.
 
 Không tự gán trọng số mẫu cho môn. Nhận dấu phẩy hoặc dấu chấm thập phân, tối đa hai chữ số thập phân. Điểm 0 là điểm hợp lệ; ô trống ở cột thường là lỗi, không tự coi là 0.
 
@@ -24,7 +24,7 @@ Phép tính dùng số nguyên (điểm × 100, trọng số × 100) để trán
 ## Vai trò và dữ liệu
 
 - Đây là công cụ tự tính dành cho **sinh viên trên Student Web**. Mobile/Desktop vẫn dành cho giảng viên.
-- Chỉ xét điều kiện tổng điểm người dùng yêu cầu. Không tự suy đoán điểm liệt FE/PE, điều kiện chuyên cần, chính sách làm tròn hay quy tắc đậu của từng môn. Người dùng được nhắc kiểm tra syllabus.
+- Xét tổng >5 và điểm FE/PE >= ngưỡng do người dùng nhập từ đề cương. Không tự suy đoán ngưỡng môn, chuyên cần, chính sách làm tròn hay các điều kiện đậu khác; người dùng vẫn cần kiểm tra syllabus.
 - Nhập liệu nằm trong bộ nhớ của màn hình; chuyển tab/lớp, đăng xuất hoặc tải lại sẽ mất bản thử. Không dùng localStorage, không gọi API ghi và không sửa snapshot điểm được giảng viên công bố từ Desktop/Mobile.
 - Tính năng không cần thay đổi API hoặc deployment backend. Cần build/deploy Student Web mới để dùng trên website đang chạy; thay đổi hiện tại chỉ ở local.
 

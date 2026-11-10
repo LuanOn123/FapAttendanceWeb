@@ -8,12 +8,18 @@ import { chatTime, chatDate, initials, mergeMessages, messageStatus, visibleMess
 const accessDenied = error => ['GROUP_ACCESS_DENIED', 'NOT_ENROLLED', 'UNAUTHENTICATED', 'PERMISSION_DENIED'].includes(error.code)
   || /không còn thuộc nhóm này|chưa được ghi danh|Phiên đăng nhập hết hạn/.test(error.message);
 
+function validatePlan(plan) {
+  if (!Array.isArray(plan?.groups) || !Array.isArray(plan?.students)) throw Error('Máy chủ trả danh sách nhóm không hợp lệ.');
+  return plan;
+}
+
 export default function StudyGroups({ classId }) {
   const [plan,setPlan]=useState(null),[groupId,setGroupId]=useState(''),[messages,setMessages]=useState([]),[loadingPlan,setLoadingPlan]=useState(true),[loadingChat,setLoadingChat]=useState(false);
   const [text,setText]=useState(''),[file,setFile]=useState(null),[error,setError]=useState(''),[sending,setSending]=useState(false),[reading,setReading]=useState(false),[downloadId,setDownloadId]=useState(''),[older,setOlder]=useState(null),[paging,setPaging]=useState(false),[outbox,setOutbox]=useState(null),[showMembers,setShowMembers]=useState(false),[newCount,setNewCount]=useState(0),[syncError,setSyncError]=useState('');
   const pending=useRef(null),viewport=useRef(null),input=useRef(null),generation=useRef(0),nearBottom=useRef(true),tracking=useRef(false),readIds=useRef(new Set()),acknowledged=useRef(new Set()),ackBusy=useRef(false),refreshChat=useRef(null);
   const knownIds=useRef(new Set());
   const [signup,setSignup]=useState(null);
+  const signupRequest=useRef(0);
   const fileReader=useRef(null);
   const [membershipChange,setMembershipChange]=useState('');
   const blocked=useRef(false), latest=useRef(null);
@@ -41,46 +47,59 @@ export default function StudyGroups({ classId }) {
     setShowMembers(false);
     setMembershipChange(reason);
   },[]);
+  const loadSignup=useCallback(async()=>{
+    const request=++signupRequest.current;
+    try {
+      const next=await portalCall('getGroupSignupSheet',{classId});
+      if(request===signupRequest.current)setSignup(next);
+    }catch { /* Keep the last known registration state until the next refresh. */ }
+  },[classId]);
   const loadPlan=useCallback(async()=>{
     const epoch=++generation.current;blocked.current=true;pending.current=null;setMembershipChange('');setSending(false);fileReader.current?.abort();fileReader.current=null;setReading(false);setFile(null);setText('');if(input.current)input.current.value='';setLoadingPlan(true);setError('');setMessages([]);setPlan(null);setGroupId('');setOutbox(null);setSignup(null);tracking.current=false;
-    portalCall('getGroupSignupSheet',{classId}).then(r=>{if(epoch===generation.current)setSignup(r);}).catch(()=>{});
-    try { const p=await portalCall('getGroupPlan',{classId});if(epoch!==generation.current)return;blocked.current=false;setSyncError('');setShowMembers(false);setDownloadId('');setPaging(false);setPlan(p);setGroupId(p.groups[0]?.id||''); }
+    loadSignup();
+    try { const p=validatePlan(await portalCall('getGroupPlan',{classId}));if(epoch!==generation.current)return;blocked.current=false;setSyncError('');setShowMembers(false);setDownloadId('');setPaging(false);setPlan(p);setGroupId(p.groups[0]?.id||''); }
     catch(e){if(epoch===generation.current)setError(e.message);}finally{if(epoch===generation.current)setLoadingPlan(false);}
-  },[classId]);
-  useEffect(()=>{loadPlan();return()=>{generation.current++;fileReader.current?.abort();fileReader.current=null;};},[loadPlan]);
+  },[classId,loadSignup]);
+  useEffect(()=>{loadPlan();return()=>{generation.current++;signupRequest.current++;fileReader.current?.abort();fileReader.current=null;};},[loadPlan]);
   useEffect(()=>{
-    latest.current={plan,groupId,hasDraft:!!(text||file||reading||sending),membershipChange};
-  },[plan,groupId,text,file,reading,sending,membershipChange]);
+    latest.current={plan,groupId,hasDraft:!!(text||file||reading||sending)};
+  },[plan,groupId,text,file,reading,sending]);
   useEffect(()=>{
-    let live=true, refreshing=false;
+    let live=true, refreshing=false, refreshingSignup=false;
     async function refreshPlan(){
-      if(document.hidden||refreshing||!latest.current?.plan)return;
+      if(document.hidden||!latest.current?.plan)return;
+      if(!refreshingSignup){
+        refreshingSignup=true;
+        loadSignup().finally(()=>{refreshingSignup=false;});
+      }
+      if(refreshing)return;
       refreshing=true;
       const epoch=generation.current;
       try {
-        const next=await portalCall('getGroupPlan',{classId});
+        const next=validatePlan(await portalCall('getGroupPlan',{classId}));
         if(!live||epoch!==generation.current)return;
         const state=latest.current;
         if((next.groups[0]?.id||'')===state.groupId){
           if(!blocked.current)setPlan(next);
           return;
         }
-        if(state.hasDraft||pending.current||state.membershipChange){
-          suspendChat('Nhóm của bạn đã thay đổi. Hội thoại cũ đã được đóng.');
+        if(state.hasDraft||pending.current||fileReader.current||blocked.current){
+          if(!blocked.current)suspendChat('Nhóm của bạn đã thay đổi. Hội thoại cũ đã được đóng.');
         }else adoptPlan(next);
       }catch(e){
-        if(live&&epoch===generation.current&&accessDenied(e))suspendChat(e.message);
+        if(live&&epoch===generation.current&&accessDenied(e))suspendChat(`Quyền truy cập đã thay đổi. ${e.message}`);
       }finally{refreshing=false;}
     }
     const timer=setInterval(refreshPlan,15000);
     document.addEventListener('visibilitychange',refreshPlan);
     return()=>{live=false;clearInterval(timer);document.removeEventListener('visibilitychange',refreshPlan);};
-  },[classId,adoptPlan,suspendChat]);
+  },[classId,adoptPlan,loadSignup,suspendChat]);
   const scrollEnd=useCallback(()=>{if(viewport.current)viewport.current.scrollTop=viewport.current.scrollHeight;nearBottom.current=true;setNewCount(0);},[]);
   const acknowledge=useCallback(async(ids,seen=false)=>{
     if(blocked.current||!tracking.current||!groupId||!ids.length)return;
-    const values=ids.filter(id=>!acknowledged.current.has(`${seen?'r':'d'}:${id}`)).slice(-50);if(!values.length)return;
-    try { await portalCall('ackGroupMessages',{classId,groupId,deliveredIds:values,readIds:seen?values:[]});for(const id of values)acknowledged.current.add(`${seen?'r':'d'}:${id}`); }
+    const receipts=acknowledged.current;
+    const values=ids.filter(id=>!receipts.has(`${seen?'r':'d'}:${id}`)).slice(-50);if(!values.length)return;
+    try { await portalCall('ackGroupMessages',{classId,groupId,deliveredIds:values,readIds:seen?values:[]});for(const id of values)receipts.add(`${seen?'r':'d'}:${id}`); }
     catch { /* Never infer delivery/read from a failed acknowledgement. */ }
   },[classId,groupId]);
   useEffect(()=>{
@@ -126,7 +145,7 @@ export default function StudyGroups({ classId }) {
     const payload=pending.current;setOutbox({id:payload.requestKey,text:payload.text,mine:true,hasFile:!!payload.file,fileName:payload.file?.name,localState:'sending'});nearBottom.current=true;
     try{
       const r=await portalCall('sendGroupMessage',payload);if(epoch!==generation.current)return;
-      if(r.createdAt)setMessages(old=>mergeMessages(old,[{id:r.id,text:payload.text,mine:true,sender:plan.viewerId,senderName:'Bạn',createdAt:r.createdAt,hasFile:!!payload.file,fileName:payload.file?.name,size:file?.size||0}]));
+      if(!blocked.current&&r.createdAt)setMessages(old=>mergeMessages(old,[{id:r.id,text:payload.text,mine:true,sender:plan.viewerId,senderName:'Bạn',createdAt:r.createdAt,hasFile:!!payload.file,fileName:payload.file?.name,size:file?.size||0}]));
       pending.current=null;setOutbox(null);setText('');setFile(null);if(input.current)input.current.value='';await refreshChat.current?.();
     }catch(e){if(epoch===generation.current){
       if(accessDenied(e))suspendChat(e.message);
