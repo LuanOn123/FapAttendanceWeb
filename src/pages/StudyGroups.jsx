@@ -1,9 +1,15 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
-import { portalCall } from '../lib/api.js';
+import { portalCall, firebaseGroupSignup } from '../lib/api.js';
 import { EmptyState, Notice } from '../components/PortalShell.jsx';
 import Skeleton from '../components/Skeleton.jsx';
 import Icon from '../components/Icon.jsx';
 import { chatTime, chatDate, initials, mergeMessages, messageStatus, visibleMessageRect } from '../lib/chat.js';
+
+const useFirebaseSignup = import.meta.env.VITE_FIREBASE_GROUP_SIGNUP === 'true';
+
+const fetchGroupPlan = classId => useFirebaseSignup
+  ? firebaseGroupSignup({ action: 'plan', classId })
+  : portalCall('getGroupPlan', { classId });
 
 const accessDenied = error => ['GROUP_ACCESS_DENIED', 'NOT_ENROLLED', 'UNAUTHENTICATED', 'PERMISSION_DENIED'].includes(error.code)
   || /không còn thuộc nhóm này|chưa được ghi danh|Phiên đăng nhập hết hạn/.test(error.message);
@@ -13,13 +19,15 @@ function validatePlan(plan) {
   return plan;
 }
 
-export default function StudyGroups({ classId }) {
+export default function StudyGroups({ classId, visible = true, onClose, pushAction }) {
   const [plan,setPlan]=useState(null),[groupId,setGroupId]=useState(''),[messages,setMessages]=useState([]),[loadingPlan,setLoadingPlan]=useState(true),[loadingChat,setLoadingChat]=useState(false);
   const [text,setText]=useState(''),[file,setFile]=useState(null),[error,setError]=useState(''),[sending,setSending]=useState(false),[reading,setReading]=useState(false),[downloadId,setDownloadId]=useState(''),[older,setOlder]=useState(null),[paging,setPaging]=useState(false),[outbox,setOutbox]=useState(null),[showMembers,setShowMembers]=useState(false),[newCount,setNewCount]=useState(0),[syncError,setSyncError]=useState('');
   const pending=useRef(null),viewport=useRef(null),input=useRef(null),generation=useRef(0),nearBottom=useRef(true),tracking=useRef(false),readIds=useRef(new Set()),acknowledged=useRef(new Set()),ackBusy=useRef(false),refreshChat=useRef(null);
   const knownIds=useRef(new Set());
   const [signup,setSignup]=useState(null);
   const signupRequest=useRef(0);
+  const [choosingGroup, setChoosingGroup] = useState(false);
+  const [signupError, setSignupError] = useState('');
   const fileReader=useRef(null);
   const [membershipChange,setMembershipChange]=useState('');
   const blocked=useRef(false), latest=useRef(null);
@@ -50,17 +58,19 @@ export default function StudyGroups({ classId }) {
   const loadSignup=useCallback(async()=>{
     const request=++signupRequest.current;
     try {
-      const next=await portalCall('getGroupSignupSheet',{classId});
+      const next = useFirebaseSignup
+        ? await firebaseGroupSignup({ action: 'status', classId })
+        : await portalCall('getGroupSignupSheet', { classId });
       if(request===signupRequest.current)setSignup(next);
     }catch { /* Keep the last known registration state until the next refresh. */ }
   },[classId]);
   const loadPlan=useCallback(async()=>{
     const epoch=++generation.current;blocked.current=true;pending.current=null;setMembershipChange('');setSending(false);fileReader.current?.abort();fileReader.current=null;setReading(false);setFile(null);setText('');if(input.current)input.current.value='';setLoadingPlan(true);setError('');setMessages([]);setPlan(null);setGroupId('');setOutbox(null);setSignup(null);tracking.current=false;
     loadSignup();
-    try { const p=validatePlan(await portalCall('getGroupPlan',{classId}));if(epoch!==generation.current)return;blocked.current=false;setSyncError('');setShowMembers(false);setDownloadId('');setPaging(false);setPlan(p);setGroupId(p.groups[0]?.id||''); }
+    try { const p=validatePlan(await fetchGroupPlan(classId));if(epoch!==generation.current)return;blocked.current=false;setSyncError('');setShowMembers(false);setDownloadId('');setPaging(false);setPlan(p);setGroupId(p.groups[0]?.id||''); }
     catch(e){if(epoch===generation.current)setError(e.message);}finally{if(epoch===generation.current)setLoadingPlan(false);}
   },[classId,loadSignup]);
-  useEffect(()=>{loadPlan();return()=>{generation.current++;signupRequest.current++;fileReader.current?.abort();fileReader.current=null;};},[loadPlan]);
+  useEffect(()=>{setSignupError('');loadPlan();return()=>{generation.current++;signupRequest.current++;fileReader.current?.abort();fileReader.current=null;};},[loadPlan]);
   useEffect(()=>{
     latest.current={plan,groupId,hasDraft:!!(text||file||reading||sending)};
   },[plan,groupId,text,file,reading,sending]);
@@ -76,7 +86,7 @@ export default function StudyGroups({ classId }) {
       refreshing=true;
       const epoch=generation.current;
       try {
-        const next=validatePlan(await portalCall('getGroupPlan',{classId}));
+        const next=validatePlan(await fetchGroupPlan(classId));
         if(!live||epoch!==generation.current)return;
         const state=latest.current;
         if((next.groups[0]?.id||'')===state.groupId){
@@ -119,16 +129,18 @@ export default function StudyGroups({ classId }) {
       finally{polling=false;}
     };
     refreshChat.current=read;read();const timer=setInterval(read,10000);const resume=()=>{if(!document.hidden)read();};document.addEventListener('visibilitychange',resume);
-    return()=>{live=false;clearInterval(timer);document.removeEventListener('visibilitychange',resume);refreshChat.current=null;};
+    const push = ({ detail }) => { if (detail?.classId === classId && detail.groupId === groupId) read(); };
+    window.addEventListener('fap-group-push', push);
+    return()=>{live=false;clearInterval(timer);document.removeEventListener('visibilitychange',resume);window.removeEventListener('fap-group-push', push);refreshChat.current=null;};
   },[classId,groupId,acknowledge,membershipChange,suspendChat]);
-  useEffect(()=>{if(nearBottom.current)scrollEnd();},[messages.length,outbox?.id,scrollEnd]);
+  useEffect(()=>{if(visible&&nearBottom.current)scrollEnd();},[visible,messages.length,outbox?.id,scrollEnd]);
   useEffect(()=>{
-    if(!viewport.current||typeof IntersectionObserver==='undefined')return;
+    if(!visible||!viewport.current||typeof IntersectionObserver==='undefined')return;
     const observer=new IntersectionObserver(entries=>{for(const e of entries){const id=e.target.dataset.messageId;if(e.isIntersecting)readIds.current.add(id);else readIds.current.delete(id);}},{root:viewport.current,threshold:0.6});
     for(const node of viewport.current.querySelectorAll('[data-message-id][data-mine="false"]'))observer.observe(node);
     const flush=setInterval(async()=>{if(ackBusy.current||document.hidden||!document.hasFocus()||!readIds.current.size)return;const top=document.querySelector('.topbar')?.getBoundingClientRect().bottom||0;const visible=[...viewport.current.querySelectorAll('[data-message-id][data-mine="false"]')].filter(node=>readIds.current.has(node.dataset.messageId)&&visibleMessageRect(node.getBoundingClientRect(),window.innerHeight,top)).map(node=>node.dataset.messageId);if(!visible.length)return;ackBusy.current=true;try{await acknowledge(visible,true);}finally{ackBusy.current=false;}},2000);
     return()=>{observer.disconnect();clearInterval(flush);readIds.current.clear();};
-  },[messages,acknowledge]);
+  },[visible,messages,acknowledge]);
   async function chooseFile(e){
     if(blocked.current||sending||reading||pending.current)return;
     const chosen=e.target.files[0];setError('');if(!chosen)return;
@@ -165,11 +177,45 @@ export default function StudyGroups({ classId }) {
     catch(e){if(epoch===generation.current){if(accessDenied(e))suspendChat(e.message);else setError(e.message);}}finally{if(epoch===generation.current)setPaging(false);}
   }
   const group=membershipChange?null:plan?.groups.find(g=>g.id===groupId),members=group?(plan?.students||[]):[],display=[...messages,...(outbox?[outbox]:[])];
-  const signupUrl=signup?.state==='OPEN'&&/^https:\/\/docs\.google\.com\/spreadsheets\/d\/[A-Za-z0-9_-]+\/edit#gid=\d+$/.test(signup.url)?signup.url:null;
+  async function chooseGroup(event) {
+    const selected = event.currentTarget.value;
+    if (!selected || choosingGroup || latest.current?.hasDraft || pending.current) return;
+    const currentGeneration = generation.current;
+    const request = ++signupRequest.current;
+    setChoosingGroup(true);
+    setSignupError('');
+    try {
+      const next = await firebaseGroupSignup({ action: 'choose', classId, roundId: signup.roundId, groupId: selected });
+      if (generation.current !== currentGeneration) return;
+      if (request === signupRequest.current) setSignup(next);
+      await loadPlan();
+    } catch (cause) {
+      if (generation.current === currentGeneration) {
+        setSignupError(cause.message);
+        await loadSignup();
+      }
+    } finally {
+      setChoosingGroup(false);
+    }
+  }
+  const canChooseGroup = useFirebaseSignup && signup?.state === 'OPEN' && Array.isArray(signup.groups);
+  const signupUrl=!useFirebaseSignup&&signup?.state==='OPEN'&&/^https:\/\/docs\.google\.com\/spreadsheets\/d\/[A-Za-z0-9_-]+\/edit#gid=\d+$/.test(signup.url)?signup.url:null;
   return <section className="card group-workspace chat-workspace" aria-label="Nhóm học tập">
-    <header className="chat-heading"><div className="chat-group-avatar"><Icon name="school" size={27}/></div><div className="chat-heading-text"><span className="eyebrow">NHÓM HỌC TẬP</span><h2>{group?.name||'Nhóm học tập của tôi'}</h2><button className="members-toggle" onClick={()=>setShowMembers(s=>!s)} disabled={!group} aria-expanded={showMembers}>{members.length} thành viên <Icon name="chevron" size={14}/></button></div><button className="icon-button" aria-label="Tải lại nhóm" title="Tải lại nhóm" disabled={sending||!!pending.current} onClick={()=>{if((text||file||reading)&&!window.confirm('Bỏ tin nhắn và tệp chưa gửi để tải lại nhóm?'))return;loadPlan();}}><Icon name="refresh"/></button></header>
+    <header className="chat-heading"><div className="chat-group-avatar"><Icon name="school" size={27}/></div><div className="chat-heading-text"><span className="eyebrow">NHÓM HỌC TẬP</span><h2>{group?.name||'Nhóm học tập của tôi'}</h2><button className="members-toggle" onClick={()=>setShowMembers(s=>!s)} disabled={!group} aria-expanded={showMembers}>{members.length} thành viên <Icon name="chevron" size={14}/></button></div><button className="icon-button" aria-label="Tải lại nhóm" title="Tải lại nhóm" disabled={sending||!!pending.current} onClick={()=>{if((text||file||reading)&&!window.confirm('Bỏ tin nhắn và tệp chưa gửi để tải lại nhóm?'))return;loadPlan();}}><Icon name="refresh"/></button>
+      {onClose && <button type="button" className="icon-button chat-minimize" aria-label="Thu gọn cửa sổ chat" title="Thu gọn cửa sổ chat" onClick={onClose}><Icon name="close" /></button>}
+    </header>
+    {pushAction}
     {showMembers&&group&&<div className="chat-members">{members.map(s=><div key={s.studentId}><span className="avatar">{initials(s.fullName)}</span><span><strong>{s.fullName}</strong><small>{s.studentCode}</small></span></div>)}</div>}
     {error&&<div className="chat-notice"><Notice>{error}</Notice></div>}
+    {canChooseGroup && <div className="group-signup-banner">
+      <div><strong>Đang mở đăng ký nhóm</strong><p>Chọn nhóm của bạn. Lựa chọn được lưu ngay cho lớp.</p></div>
+      <label>Nhóm của bạn <select aria-label="Chọn nhóm" value={signup.selectedGroupId || ''} onChange={chooseGroup}
+        disabled={choosingGroup || sending || reading || Boolean(text || file || outbox)}>
+        <option value="" disabled>Chọn nhóm</option>
+        {signup.groups.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
+      </select></label>
+    </div>}
+    {signupError && <p role="alert">{signupError}</p>}
     {signupUrl&&<div className="group-signup-banner" role="status"><div><strong>Đang mở đăng ký nhóm</strong><p>Chọn nhóm ở dòng MSSV của bạn trên Google Sheets. Chờ cột Đồng bộ xác nhận. Nhóm sẽ tự cập nhật khi bạn quay lại.</p></div><a href={signupUrl} target="_blank" rel="noreferrer">Chọn nhóm trên Google Sheets <Icon name="arrow" size={16}/></a></div>}
     {pending.current&&!sending&&!membershipChange&&<button className="pending-discard" type="button" onClick={()=>{if(!window.confirm('Tin nhắn có thể đã được máy chủ nhận. Bỏ bản chờ và kiểm tra lịch sử trước khi gửi mới?'))return;pending.current=null;setOutbox(null);setText('');setFile(null);loadPlan();}}>Bỏ bản gửi đang chờ và kiểm tra lại</button>}
     {loadingPlan?<Skeleton kind="chat" label="Đang tải nhóm…"/> :membershipChange?<div className="chat-notice">
@@ -179,7 +225,7 @@ export default function StudyGroups({ classId }) {
         if((text||file||reading||pending.current)&&!window.confirm('Bỏ bản nháp hoặc lượt gửi chưa xác nhận và tải nhóm hiện tại?'))return;
         loadPlan();
       }}>Kiểm tra và tải nhóm hiện tại</button>
-    </div>:!group?<EmptyState icon="school" title={error?'Chưa tải được nhóm':signupUrl?'Chọn nhóm để bắt đầu':'Bạn chưa được xếp nhóm'}>{error?'Bấm tải lại để kiểm tra nhóm của bạn.':signupUrl?'Mở Sheet đăng ký phía trên, chọn nhóm và đợi xác nhận đồng bộ.':'Giảng viên chưa xếp bạn vào nhóm. Nhóm sẽ tự cập nhật khi có thay đổi.'}</EmptyState>:<>
+    </div>:!group?<EmptyState icon="school" title={error?'Chưa tải được nhóm':(canChooseGroup||signupUrl)?'Chọn nhóm để bắt đầu':'Bạn chưa được xếp nhóm'}>{error?'Bấm tải lại để kiểm tra nhóm của bạn.':canChooseGroup?'Chọn nhóm ở ô đăng ký phía trên.':signupUrl?'Mở Sheet đăng ký phía trên, chọn nhóm và đợi xác nhận đồng bộ.':'Giảng viên chưa xếp bạn vào nhóm. Nhóm sẽ tự cập nhật khi có thay đổi.'}</EmptyState>:<>
       <div className="chat-toolbar"><span><Icon name="shield" size={14}/> Chỉ thành viên nhóm và giảng viên có quyền truy cập</span><span className={syncError?'chat-connection error':'chat-connection'}><i/>{syncError?'Chưa đồng bộ':'Cập nhật mỗi 10 giây'}</span></div>
       {syncError&&<div className="chat-sync-error" role="alert">{syncError}<button onClick={()=>refreshChat.current?.()}>Thử lại</button></div>}
       <div className="conversation" ref={viewport} aria-label="Tin nhắn nhóm" aria-busy={loadingChat} onScroll={()=>{const p=viewport.current;nearBottom.current=p.scrollHeight-p.scrollTop-p.clientHeight<80;if(nearBottom.current)setNewCount(0);}}>

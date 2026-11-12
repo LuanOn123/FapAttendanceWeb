@@ -2,24 +2,48 @@ import { useEffect, useRef, useState } from 'react';
 import { leaveStatuses, portalCall, portalEndpoint, vietnamDate } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
 import StudyGroups from './StudyGroups.jsx';
-import TaskNotifications, { useTaskNotifications } from './TaskNotifications.jsx';
+import TaskNotifications, { TaskBell, useTaskNotifications } from './TaskNotifications.jsx';
 import Skeleton from '../components/Skeleton.jsx';
 import GradeForecast from './GradeForecast.jsx';
-import { EmptyState, Notice } from '../components/PortalShell.jsx';
+import { EmptyState, Notice, PortalShell } from '../components/PortalShell.jsx';
+import { enableGroupPush, groupPushConfigured, wantsGroupPush } from '../lib/groupPush.js';
 
 const localTime = value => new Date(value).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+const classViews = [
+  { id: 'grades', icon: 'book', label: 'Điểm đã công bố' },
+  { id: 'leave', icon: 'calendar', label: 'Xin nghỉ' },
+  { id: 'forecast', icon: 'spark', label: 'Tính điểm FE/PE' },
+];
 
-export default function Student({ user }) {
-  const [classes, setClasses] = useState([]), [selected, setSelected] = useState('');
+export default function Student({ user, onLogout, logoutBusy, logoutError }) {
+  const [chatClass, setChatClass] = useState(() => new URLSearchParams(window.location.search).get('chatClass'));
+  const [classes, setClasses] = useState([]), [selected, setSelected] = useState(chatClass || '');
   const [loading, setLoading] = useState(true), [error, setError] = useState('');
-  const [tab, setTab] = useState(() => window.location.hash === '#tasks' ? 'tasks' : 'grades'), [revision, setRevision] = useState(0);
+  const [tab, setTab] = useState('grades'), [revision, setRevision] = useState(0);
+  const [showTasks, setShowTasks] = useState(() => window.location.hash === '#tasks');
+  const [chatPush, setChatPush] = useState(''), [pushBusy, setPushBusy] = useState(false);
+  useEffect(() => {
+    if (!wantsGroupPush(user.uid)) return;
+    let live = true;
+    enableGroupPush(user.uid).then(() => { if (live) setChatPush('Đã bật thông báo chat'); }).catch(() => {});
+    return () => { live = false; };
+  }, [user.uid]);
+  async function requestChatPush() {
+    setPushBusy(true);
+    try {
+      await enableGroupPush(user.uid, { ask: true });
+      setChatPush('Đã bật thông báo chat');
+    } catch (e) { setChatPush(e.message); }
+    finally { setPushBusy(false); }
+  }
   const inbox = useTaskNotifications(user.uid);
   const selectTab = value => {
-    setTab(value);
+    if (value !== 'tasks') setTab(value);
+    setShowTasks(value === 'tasks');
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${value === 'tasks' ? '#tasks' : ''}`);
   };
   useEffect(() => {
-    const openTasks = () => { if (window.location.hash === '#tasks') setTab('tasks'); };
+    const openTasks = () => { if (window.location.hash === '#tasks') setShowTasks(true); };
     window.addEventListener('hashchange', openTasks);
     return () => window.removeEventListener('hashchange', openTasks);
   }, []);
@@ -31,32 +55,73 @@ export default function Student({ user }) {
     return () => { live = false; };
   }, [user.uid, revision]);
   const cls = classes.find(c => c.classId === selected);
-  return <main className="wrap" id="main-content">
-    <section className="page-intro"><div><span className="eyebrow">KHÔNG GIAN HỌC TẬP</span><h1>Theo dõi học tập,<br /><span>chủ động mỗi ngày.</span></h1><p>Xem điểm đã công bố và gửi đơn xin nghỉ đến giảng viên.</p></div>
-      <div className="class-stat"><span className="stat-icon"><Icon name="layers" size={25} /></span><div><strong>{loading ? '—' : error && !classes.length ? '—' : String(classes.length).padStart(2, '0')}</strong><span>Lớp học của bạn</span></div></div>
-    </section>
-    {!portalEndpoint && <Notice>Quản trị viên cần kết nối cổng sinh viên với backend chung trước khi sử dụng.</Notice>}
-    <nav className="task-shortcut" aria-label="Công việc nhóm">
-      <button className={tab === 'tasks' ? 'primary' : 'refresh-button'} aria-pressed={tab === 'tasks'} onClick={() => selectTab('tasks')}><Icon name="bell" /><span>Thông báo giao việc</span><span className="count-badge">{inbox.unread == null ? '—' : inbox.unread}</span></button>
-      {tab === 'tasks' && <button className="refresh-button" onClick={() => selectTab('grades')}><Icon name="book" />Về lớp học</button>}
-    </nav>
-    {tab === 'tasks' ? <TaskNotifications inbox={inbox} /> : <>
-    {error && <Notice><strong>Chưa tải được lớp học</strong><p>{error}</p></Notice>}
-    <section className="card class-picker"><div className="class-picker-label"><span className="feature-icon"><Icon name="school" size={24} /></span><div><label htmlFor="class-select">Lớp học</label><p>Chọn lớp để xem thông tin</p></div></div>
-      {classes.length > 0 ? <select id="class-select" value={selected} disabled={loading} onChange={e => setSelected(e.target.value)}>{classes.map(c => <option key={c.classId} value={c.classId}>{c.subjectCode} · {c.classCode} · {c.semester}</option>)}</select> : <span className="muted picker-placeholder">{loading ? 'Đang tải danh sách lớp…' : 'Chưa có dữ liệu lớp'}</span>}
-      <button onClick={() => setRevision(r => r + 1)} disabled={loading} className="refresh-button"><Icon name="refresh" className={loading ? 'spin' : ''} /><span>Tải lại lớp</span></button>
-    </section>
-    {loading ? <section className="card"><Skeleton label="Đang tải lớp học…"/></section> : !classes.length ? !error && <section className="card"><EmptyState icon="school" title="Lớp học của bạn sẽ xuất hiện tại đây">Chưa có lớp học. Hãy nhờ giảng viên kiểm tra email và danh sách lớp của bạn.</EmptyState></section> : <>
-      <div className="workspace-heading"><div className="tabs" aria-label="Thông tin lớp học">
-        <button className={tab === 'grades' ? 'tab active' : 'tab'} aria-pressed={tab === 'grades'} onClick={() => selectTab('grades')}><Icon name="book" />Điểm đã công bố</button>
-        <button className={tab === 'leave' ? 'tab active' : 'tab'} aria-pressed={tab === 'leave'} onClick={() => selectTab('leave')}><Icon name="calendar" />Xin nghỉ</button>
-        <button className={tab === 'groups' ? 'tab active' : 'tab'} aria-pressed={tab === 'groups'} onClick={() => selectTab('groups')}><Icon name="school" />Nhóm học tập</button>
-        <button className={tab === 'forecast' ? 'tab active' : 'tab'} aria-pressed={tab === 'forecast'} onClick={() => selectTab('forecast')}><Icon name="spark" />Tính điểm FE/PE</button>
-      </div><span className="class-context"><span className="term-badge">{cls?.semester}</span>{cls?.classCode}</span></div>
-      {selected && (tab === 'forecast' ? <GradeForecast key={`${user.uid}/${selected}`} /> : tab === 'groups' ? <StudyGroups key={`${user.uid}/${selected}`} classId={selected} /> : tab === 'grades' ? <PublishedGrades key={`${user.uid}/${selected}`} classId={selected} /> : <LeaveRequests key={`${user.uid}/${selected}`} classId={selected} />)}
-    </>}
-    </>}
-  </main>;
+  const classKey = `${user.uid}/${selected}`;
+  return <PortalShell user={user} onLogout={onLogout} logoutBusy={logoutBusy}
+    headerAction={<TaskBell inbox={inbox} active={showTasks} onClick={() => selectTab(showTasks ? tab : 'tasks')} />}>
+    <main className="wrap" id="main-content">
+      {logoutError && <Notice>{logoutError}</Notice>}
+      <section className="page-intro student-intro"><div><span className="eyebrow">CỔNG SINH VIÊN</span><h1>Không gian học tập</h1><p>Xem điểm, gửi đơn xin nghỉ và theo dõi thông báo.</p></div>
+        <div className="class-stat"><span className="stat-icon"><Icon name="layers" size={25} /></span><div><strong>{loading ? '—' : error && !classes.length ? '—' : String(classes.length).padStart(2, '0')}</strong><span>Lớp học của bạn</span></div></div>
+      </section>
+      {!portalEndpoint && <Notice>Quản trị viên cần kết nối cổng sinh viên với backend chung trước khi sử dụng.</Notice>}
+      <div className="student-layout">
+        <nav className="card student-sidebar" aria-label="Thông tin lớp học">
+          <span className="eyebrow">LỚP HỌC</span>
+          {classViews.map(({ id, icon, label }) => <button key={id} type="button" className="tab"
+            aria-pressed={!showTasks && tab === id} onClick={() => selectTab(id)}>
+            <Icon name={icon} /><span>{label}</span>
+          </button>)}
+        </nav>
+        <div className="student-content">
+          {showTasks ? <TaskNotifications inbox={inbox} /> : <>
+            {error && <Notice><strong>Chưa tải được lớp học</strong><p>{error}</p></Notice>}
+            <section className="card class-picker"><div className="class-picker-label"><span className="feature-icon"><Icon name="school" size={24} /></span><div><label htmlFor="class-select">Lớp học</label><p>Chọn lớp để xem thông tin</p></div></div>
+              {classes.length > 0 ? <select id="class-select" value={selected} disabled={loading} onChange={e => { setChatClass(null); setSelected(e.target.value); }}>{classes.map(c => <option key={c.classId} value={c.classId}>{c.subjectCode} · {c.classCode} · {c.semester}</option>)}</select> : <span className="muted picker-placeholder">{loading ? 'Đang tải danh sách lớp…' : 'Chưa có dữ liệu lớp'}</span>}
+              <button onClick={() => setRevision(r => r + 1)} disabled={loading} className="refresh-button"><Icon name="refresh" className={loading ? 'spin' : ''} /><span>Tải lại lớp</span></button>
+            </section>
+            {loading && <section className="card"><Skeleton label="Đang tải lớp học…"/></section>}
+            {!loading && !error && !cls && <section className="card"><EmptyState icon="school" title="Lớp học của bạn sẽ xuất hiện tại đây">Chưa có lớp học. Hãy nhờ giảng viên kiểm tra email và danh sách lớp của bạn.</EmptyState></section>}
+            {!loading && cls && <>
+              <div className="student-class-context"><span className="class-context"><span className="term-badge">{cls.semester}</span>{cls.classCode}</span></div>
+              {tab === 'grades' && <PublishedGrades key={classKey} classId={selected} />}
+              {tab === 'leave' && <LeaveRequests key={classKey} classId={selected} />}
+              {tab === 'forecast' && <GradeForecast key={classKey} />}
+            </>}
+          </>}
+        </div>
+      </div>
+      {cls && <GroupChat key={classKey} classId={selected} startOpen={chatClass === selected}
+        pushAction={groupPushConfigured ? <div className="chat-toolbar">
+          <span role="status">{chatPush}</span>
+          {chatPush !== 'Đã bật thông báo chat' && <button type="button" onClick={requestChatPush} disabled={pushBusy}>Bật thông báo chat</button>}
+        </div> : null} />}
+    </main>
+  </PortalShell>;
+}
+
+function GroupChat({ classId, startOpen, pushAction }) {
+  const [open, setOpen] = useState(startOpen), [started, setStarted] = useState(startOpen);
+  const panel = useRef(null), launcher = useRef(null);
+  useEffect(() => { if (open) panel.current?.focus(); }, [open]);
+
+  function close() {
+    setOpen(false);
+    launcher.current?.focus();
+  }
+
+  return <div className="group-chat-widget">
+    <div id="group-chat-panel" className="group-chat-panel" ref={panel} hidden={!open}
+      role="dialog" aria-label="Chat nhóm học tập" tabIndex={-1}
+      onKeyDown={event => { if (event.key === 'Escape') close(); }}>
+      {started && <StudyGroups classId={classId} visible={open} onClose={close} pushAction={pushAction} />}
+    </div>
+    <button type="button" className="group-chat-launcher" ref={launcher}
+      title={open ? 'Thu gọn chat nhóm' : 'Mở chat nhóm học tập'}
+      aria-label={open ? 'Thu gọn chat nhóm' : 'Mở chat nhóm học tập'} aria-expanded={open} aria-controls="group-chat-panel"
+      onClick={() => { if (open) close(); else { setStarted(true); setOpen(true); } }}>
+      <Icon name={open ? 'chevron' : 'chat'} size={25} />
+    </button>
+  </div>;
 }
 
 function PublishedGrades({ classId }) {

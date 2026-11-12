@@ -3,8 +3,9 @@ import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { auth, googleProvider } from './firebase.js';
 import Student from './pages/Student.jsx';
 import Icon, { GoogleIcon } from './components/Icon.jsx';
-import { Brand, Notice, PortalShell } from './components/PortalShell.jsx';
+import { Brand, Notice } from './components/PortalShell.jsx';
 import { PortalSkeleton } from './components/Skeleton.jsx';
+import { disableGroupPush, groupPushConfigured } from './lib/groupPush.js';
 
 export default function App() {
   const [user, setUser] = useState(undefined), [error, setError] = useState(''), [busy, setBusy] = useState(false);
@@ -15,7 +16,18 @@ export default function App() {
   }
   async function logout() {
     setError(''); setBusy(true);
-    try { await signOut(auth); } catch { setError('Chưa đăng xuất được. Vui lòng thử lại.'); } finally { setBusy(false); }
+    try {
+      if (groupPushConfigured && user) {
+        let timeout;
+        try {
+          await Promise.race([
+            disableGroupPush(user.uid).catch(() => {}),
+            new Promise(resolve => { timeout = setTimeout(resolve, 3500); }),
+          ]);
+        } finally { clearTimeout(timeout); }
+      }
+      await signOut(auth);
+    } catch { setError('Chưa đăng xuất được. Vui lòng thử lại.'); } finally { setBusy(false); }
   }
   if (user === undefined) return <PortalSkeleton />;
   if (!user) return <div className="login-page">
@@ -34,8 +46,5 @@ export default function App() {
       </section>
     </main><footer className="login-footer">FAP Attendance <span>·</span> Đồng hành cùng mỗi buổi học</footer>
   </div>;
-  return <PortalShell user={user} onLogout={logout} logoutBusy={busy}>
-    {error && <div className="wrap global-notice"><Notice>{error}</Notice></div>}
-    <Student key={user.uid} user={user} />
-  </PortalShell>;
+  return <Student key={user.uid} user={user} onLogout={logout} logoutBusy={busy} logoutError={error} />;
 }

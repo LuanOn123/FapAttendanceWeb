@@ -8,6 +8,31 @@ export function taskTime(value) {
   return new Date(value).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+export function TaskBell({ inbox, active, onClick }) {
+  const { unread, rows } = inbox;
+  const latest = rows.find(row => !row.readAt);
+  const previous = useRef({ unread: 0, createdAt: '', id: '' });
+  const [ring, setRing] = useState(0);
+  const createdAt = latest?.createdAt || '', id = latest?.id || '';
+
+  useEffect(() => {
+    if (unread == null) return;
+    const last = previous.current;
+    if (unread > last.unread || (unread > 0 && id !== last.id && createdAt > last.createdAt)) {
+      setRing(value => value + 1);
+    }
+    previous.current = { unread, createdAt, id };
+  }, [unread, createdAt, id]);
+
+  const hasUnread = unread > 0;
+  return <button type="button" className={`task-bell${hasUnread ? ' has-unread' : ''}`}
+    aria-label={hasUnread ? `Thông báo giao việc, ${unread} chưa đọc` : 'Thông báo giao việc'}
+    title="Thông báo giao việc" aria-pressed={active} onClick={onClick}>
+    <Icon key={ring} name="bell" size={22} className={hasUnread && ring ? 'bell-ring' : ''} />
+    {hasUnread && <span className="task-bell-count" aria-hidden="true">{unread > 99 ? '99+' : unread}</span>}
+  </button>;
+}
+
 // Mounted once for the signed-in student so the badge updates on every class tab.
 export function useTaskNotifications(uid) {
   const [state, setState] = useState({ rows: [], unread: null, older: null, loading: true, error: '', readError: '', reading: '' });

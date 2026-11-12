@@ -75,4 +75,24 @@ describe('student portal', () => {
     resolveOld({ published: true, components: [{ id: 'p', name: 'STALE', maxScore: 10 }], grades: { p: 9 }, publishedAt: '2026-10-24T01:00:00Z', version: 1 });
     await waitFor(() => expect(screen.queryByText('STALE')).toBeNull());
   });
+  it('opens chat from the launcher and preserves the draft when switching views and minimizing', async () => {
+    mockApi(async method => {
+      if (method === 'listClasses') return classes;
+      if (method === 'getGroupPlan') return { groups: [{ id: 'g1', name: 'Nhóm 1' }], students: [] };
+      if (method === 'getGroupMessages') return { messages: [], older: null };
+      return { published: false };
+    });
+    const events = userEvent.setup(); render(<Student user={user} />);
+    const launcher = await screen.findByRole('button', { name: 'Mở chat nhóm học tập' });
+    expect(mocks.call.mock.calls.some(([method]) => method === 'getGroupPlan')).toBe(false);
+    await events.click(launcher);
+    await screen.findByRole('heading', { name: 'Nhóm 1' });
+    await events.type(screen.getByRole('textbox', { name: 'Tin nhắn cho nhóm' }), 'Bản nháp');
+    await events.click(screen.getByRole('button', { name: 'Tính điểm FE/PE' }));
+    await events.click(screen.getByRole('button', { name: 'Thu gọn cửa sổ chat' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(launcher);
+    await events.click(launcher);
+    expect(screen.getByRole('textbox', { name: 'Tin nhắn cho nhóm' }).value).toBe('Bản nháp');
+  });
 });

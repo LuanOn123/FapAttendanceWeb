@@ -81,6 +81,28 @@ it('email #tasks link opens notifications without requiring class selection', as
   expect(screen.queryByRole('combobox', { name: 'Lớp học' })).toBeNull();
 });
 
+it('rings the header bell when a refresh brings an unread notification', async () => {
+  let notifications = [];
+  mocks.call.mockImplementation(async method => method === 'listClasses' ? [] : page(notifications));
+  const events = userEvent.setup();
+  await act(async () => { render(<Student user={{ uid: 'u1' }} />); });
+  const bell = screen.getByRole('button', { name: 'Thông báo giao việc' });
+  expect(bell.closest('header')).toBeTruthy();
+  expect(bell.classList.contains('has-unread')).toBe(false);
+
+  notifications = [notification()];
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+  expect(screen.getByRole('button', { name: 'Thông báo giao việc, 1 chưa đọc' })).toBe(bell);
+  expect(bell.classList.contains('has-unread')).toBe(true);
+  const icon = bell.querySelector('.bell-ring');
+  expect(icon).toBeTruthy();
+
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+  expect(bell.querySelector('.bell-ring')).toBe(icon);
+  await events.click(bell);
+  expect(await screen.findByRole('button', { name: 'Hoàn thành lab' })).toBeTruthy();
+});
+
 it('polls only while visible and stops after unmount', async () => {
   vi.useFakeTimers(); mocks.call.mockResolvedValue(page([]));
   const view = render(<Harness />);
