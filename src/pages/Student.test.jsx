@@ -42,6 +42,15 @@ describe('student portal', () => {
     expect(await screen.findByRole('cell', { name: '0' })).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
   });
+  it('loads a newly published grade when the student returns to the page', async () => {
+    let grades = { published: false };
+    mockApi(async method => method === 'listClasses' ? classes : grades);
+    render(<Student user={user} />);
+    await screen.findByText('Giảng viên chưa công bố điểm.');
+    grades = { published: true, components: [{ id: 'p', name: 'PE', maxScore: 10 }], grades: { p: 9 }, publishedAt: '2026-10-24T01:00:00Z', version: 1 };
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(await screen.findByRole('cell', { name: '9' })).toBeTruthy();
+  });
   it('submits a future occurrence with an idempotency key and shows pending history', async () => {
     let submitted = false;
     mockApi(async (method, data) => {

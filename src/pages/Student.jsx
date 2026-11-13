@@ -126,12 +126,33 @@ function GroupChat({ classId, startOpen, pushAction }) {
 
 function PublishedGrades({ classId }) {
   const [data, setData] = useState(null), [error, setError] = useState(''), [revision, setRevision] = useState(0);
+  const [loading, setLoading] = useState(false);
   useEffect(() => {
-    let live = true; setData(null); setError('');
-    portalCall('getMyPublishedGrades', { classId }).then(r => { if (live) setData(r); }).catch(e => { if (live) setError(e.message); });
-    return () => { live = false; };
+    let live = true, pending = false;
+    async function refresh() {
+      if (pending || document.visibilityState === 'hidden') return;
+      pending = true;
+      setLoading(true);
+      try {
+        const result = await portalCall('getMyPublishedGrades', { classId });
+        if (live) { setData(result); setError(''); }
+      } catch (e) {
+        if (live) setError(e.message);
+      } finally {
+        pending = false;
+        if (live) setLoading(false);
+      }
+    }
+    refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [classId, revision]);
-  return <div className="content-grid"><section className="card grade-card"><div className="card-heading"><div><span className="eyebrow">KẾT QUẢ HỌC TẬP</span><h2>Điểm của tôi</h2></div><button className="refresh-button" onClick={() => setRevision(r => r + 1)}><Icon name="refresh" /><span>Tải lại điểm</span></button></div>
+  return <div className="content-grid"><section className="card grade-card"><div className="card-heading"><div><span className="eyebrow">KẾT QUẢ HỌC TẬP</span><h2>Điểm của tôi</h2></div><button className="refresh-button" disabled={loading} onClick={() => setRevision(r => r + 1)}><Icon name="refresh" /><span>Tải lại điểm</span></button></div>
     {error ? <Notice>{error}</Notice> : !data ? <Skeleton kind="grades" label="Đang tải điểm…"/> : !data.published ? <EmptyState icon="book" title="Giảng viên chưa công bố điểm.">Kết quả học tập sẽ xuất hiện tại đây khi giảng viên công bố. Bạn có thể quay lại hoặc tải lại điểm sau.</EmptyState> : <>
       <div className="publication-meta"><span className="status-badge approved"><Icon name="check" size={14} />Đã công bố</span><span><Icon name="clock" size={15} />{localTime(data.publishedAt)}</span><small>Phiên bản {data.version}</small></div>
       <div className="table-scroll"><table className="grades"><thead><tr><th>Cột điểm</th><th>Điểm</th><th>Thang điểm</th></tr></thead><tbody>{data.components.map(c => {
